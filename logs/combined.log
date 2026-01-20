@@ -803,3 +803,7 @@
 {"duration":"1ms","level":"info","message":"API Response","requestId":"95c56680-8a84-428f-8f4d-07a3889fc2f9","service":"suban-ai-backend","statusCode":200,"timestamp":"2026-01-20 08:02:15"}
 {"level":"info","message":"API Request","method":"POST","path":"/api/voice/session","requestId":"9fe59b73-0fe9-4929-a8b4-9fa714d36ab5","service":"suban-ai-backend","timestamp":"2026-01-20 08:02:21","walletAddress":"22hrGCE1Q2khNo8G2B2hhfnaAxZiwf6AVtoDnRVD2sv8"}
 {"duration":"4ms","level":"info","message":"API Response","requestId":"9fe59b73-0fe9-4929-a8b4-9fa714d36ab5","service":"suban-ai-backend","statusCode":503,"timestamp":"2026-01-20 08:02:21"}
+{"level":"info","message":"API Request","method":"GET","path":"/api/token/balance/22hrGCE1Q2khNo8G2B2hhfnaAxZiwf6AVtoDnRVD2sv8","requestId":"b05b3d7f-c1a9-483b-9166-634ab7032001","service":"suban-ai-backend","timestamp":"2026-01-20 08:02:46"}
+{"duration":"1ms","level":"info","message":"API Response","requestId":"b05b3d7f-c1a9-483b-9166-634ab7032001","service":"suban-ai-backend","statusCode":200,"timestamp":"2026-01-20 08:02:46"}
+{"level":"info","message":"API Request","method":"GET","path":"/api/token/price","requestId":"6c4b4d3c-41db-44ac-b0ed-aa7e3bc79363","service":"suban-ai-backend","timestamp":"2026-01-20 08:02:46"}
+{"duration":"1ms","level":"info","message":"API Response","requestId":"6c4b4d3c-41db-44ac-b0ed-aa7e3bc79363","service":"suban-ai-backend","statusCode":200,"timestamp":"2026-01-20 08:02:46"}
