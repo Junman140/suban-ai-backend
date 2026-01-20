@@ -827,3 +827,8 @@
 {"duration":"2ms","level":"info","message":"API Response","requestId":"8a625935-b9f1-4e21-95f9-1bbd4061d5e9","service":"suban-ai-backend","statusCode":200,"timestamp":"2026-01-20 08:05:16"}
 {"level":"info","message":"API Request","method":"GET","path":"/api/token/price","requestId":"ae7e57a5-7cac-43d3-9ca4-98299d73c979","service":"suban-ai-backend","timestamp":"2026-01-20 08:05:16"}
 {"duration":"2711ms","level":"info","message":"API Response","requestId":"ae7e57a5-7cac-43d3-9ca4-98299d73c979","service":"suban-ai-backend","statusCode":200,"timestamp":"2026-01-20 08:05:19"}
+{"level":"info","message":"API Request","method":"GET","path":"/api/token/balance/22hrGCE1Q2khNo8G2B2hhfnaAxZiwf6AVtoDnRVD2sv8","requestId":"52e0c133-0506-4bd8-b4a7-68e6ebd42ef7","service":"suban-ai-backend","timestamp":"2026-01-20 08:05:46"}
+{"duration":"2ms","level":"info","message":"API Response","requestId":"52e0c133-0506-4bd8-b4a7-68e6ebd42ef7","service":"suban-ai-backend","statusCode":200,"timestamp":"2026-01-20 08:05:46"}
+{"level":"info","message":"API Request","method":"GET","path":"/api/token/price","requestId":"7e194ff7-f659-4741-bb75-a54c9b1ef215","service":"suban-ai-backend","timestamp":"2026-01-20 08:05:46"}
+{"duration":"2ms","level":"info","message":"API Response","requestId":"7e194ff7-f659-4741-bb75-a54c9b1ef215","service":"suban-ai-backend","statusCode":200,"timestamp":"2026-01-20 08:05:46"}
+{"level":"info","message":"MongoDB connection closed due to application termination","requestId":"no-request-id","service":"suban-ai-backend","timestamp":"2026-01-20 08:06:02"}
