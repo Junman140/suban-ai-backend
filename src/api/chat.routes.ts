@@ -3,7 +3,7 @@ import balanceTracker from '../services/solana/balance-tracker.service';
 import priceOracle from '../services/solana/price-oracle.service';
 import llmService from '../services/llm.service';
 import tokenMeterService from '../services/tokenMeter.service';
-import { verifyWallet } from '../middleware/auth.middleware';
+import { verifyWallet, isAdminUser } from '../middleware/auth.middleware';
 import { chatRateLimiter, costCalculationRateLimiter } from '../middleware/rateLimit.middleware';
 import { estimateCost } from '../utils/costCalculator';
 import mongoose from 'mongoose';
@@ -29,11 +29,14 @@ router.post('/message', chatRateLimiter, verifyWallet, async (req: Request, res:
             return res.status(400).json({ error: 'Wallet address is required' });
         }
 
+        // Check if user is admin (admins bypass token checks for testing)
+        const isAdmin = await isAdminUser(walletAddress);
+
         // Determine user tier (default to free)
         const tier: 'free' | 'paid' = userTier || 'free';
 
-        // Check free tier limits
-        if (tier === 'free') {
+        // Check free tier limits (skip for admin users)
+        if (tier === 'free' && !isAdmin) {
             // For free tier, we need a userId to track daily usage
             // If no userId provided, we'll use walletAddress as identifier
             const userIdentifier = userId || walletAddress;
@@ -51,20 +54,22 @@ router.post('/message', chatRateLimiter, verifyWallet, async (req: Request, res:
         const estimatedCost = estimateCost(500, 500, 'deepseek'); // Rough estimate
         const requiredTokens = priceOracle.calculateTokenBurn(estimatedCost);
 
-        // Check balance
-        const hasSufficientBalance = await balanceTracker.hasSufficientBalance(
-            walletAddress,
-            requiredTokens
-        );
+        // Check balance (skip for admin users)
+        if (!isAdmin) {
+            const hasSufficientBalance = await balanceTracker.hasSufficientBalance(
+                walletAddress,
+                requiredTokens
+            );
 
-        if (!hasSufficientBalance) {
-            const balance = await balanceTracker.getBalance(walletAddress);
-            return res.status(402).json({
-                error: 'Insufficient tokens',
-                required: requiredTokens,
-                available: balance.currentBalance,
-                costUsd: estimatedCost,
-            });
+            if (!hasSufficientBalance) {
+                const balance = await balanceTracker.getBalance(walletAddress);
+                return res.status(402).json({
+                    error: 'Insufficient tokens',
+                    required: requiredTokens,
+                    available: balance.currentBalance,
+                    costUsd: estimatedCost,
+                });
+            }
         }
 
         // Generate session ID for tracking
@@ -101,13 +106,19 @@ router.post('/message', chatRateLimiter, verifyWallet, async (req: Request, res:
             // Don't fail the request if usage tracking fails
         }
 
-        // Deduct tokens after successful response
-        const updatedBalance = await balanceTracker.deductTokens(
-            walletAddress,
-            actualRequiredTokens,
-            'chat',
-            actualCostUsd
-        );
+        // Deduct tokens after successful response (skip for admin users)
+        let updatedBalance;
+        if (!isAdmin) {
+            updatedBalance = await balanceTracker.deductTokens(
+                walletAddress,
+                actualRequiredTokens,
+                'chat',
+                actualCostUsd
+            );
+        } else {
+            // For admin users, just get balance without deducting
+            updatedBalance = await balanceTracker.getBalance(walletAddress);
+        }
 
         res.json({
             reply: llmResponse.content,

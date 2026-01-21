@@ -38,18 +38,22 @@ router.post('/session', rateLimit_middleware_1.voiceRateLimiter, auth_middleware
                 message: 'Grok Voice Agent requires GROK_API_KEY to be set'
             });
         }
+        // Check if user is admin (admins bypass token checks for testing)
+        const isAdmin = yield (0, auth_middleware_1.isAdminUser)(userWallet);
         // Estimate cost for voice session
         const requiredTokens = price_oracle_service_1.default.calculateTokenBurn(ESTIMATED_VOICE_SESSION_COST_USD);
-        // Check balance
-        const hasSufficientBalance = yield balance_tracker_service_1.default.hasSufficientBalance(userWallet, requiredTokens);
-        if (!hasSufficientBalance) {
-            const balance = yield balance_tracker_service_1.default.getBalance(userWallet);
-            return res.status(402).json({
-                error: 'Insufficient tokens',
-                required: requiredTokens,
-                available: balance.currentBalance,
-                costUsd: ESTIMATED_VOICE_SESSION_COST_USD,
-            });
+        // Check balance (skip for admin users)
+        if (!isAdmin) {
+            const hasSufficientBalance = yield balance_tracker_service_1.default.hasSufficientBalance(userWallet, requiredTokens);
+            if (!hasSufficientBalance) {
+                const balance = yield balance_tracker_service_1.default.getBalance(userWallet);
+                return res.status(402).json({
+                    error: 'Insufficient tokens',
+                    required: requiredTokens,
+                    available: balance.currentBalance,
+                    costUsd: ESTIMATED_VOICE_SESSION_COST_USD,
+                });
+            }
         }
         // Create voice session
         const session = yield voice_service_1.default.createSession({

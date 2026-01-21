@@ -12,9 +12,11 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.protect = exports.verifyAdmin = exports.verifyWallet = void 0;
+exports.protect = exports.verifyAdmin = exports.isAdminUser = exports.verifyWallet = void 0;
 const web3_js_1 = require("@solana/web3.js");
 const tweetnacl_1 = __importDefault(require("tweetnacl"));
+const mongoose_1 = __importDefault(require("mongoose"));
+const user_model_1 = __importDefault(require("../models/user.model"));
 /**
  * Verify wallet signature authentication
  * For routes that require wallet verification, expects:
@@ -53,25 +55,43 @@ const verifyWallet = (req, res, next) => __awaiter(void 0, void 0, void 0, funct
 });
 exports.verifyWallet = verifyWallet;
 /**
+ * Check if a wallet address is an admin user
+ * Checks MongoDB first, then falls back to environment variable
+ */
+const isAdminUser = (walletAddress) => __awaiter(void 0, void 0, void 0, function* () {
+    var _a, _b;
+    try {
+        // Check MongoDB if connected
+        if (mongoose_1.default.connection.readyState === 1) {
+            const user = yield user_model_1.default.findOne({ walletAddress: walletAddress.toLowerCase() });
+            if (user && user.isAdmin) {
+                return true;
+            }
+        }
+        // Fallback to environment variable
+        const adminWallets = ((_a = process.env.ADMIN_WALLET_ADDRESSES) === null || _a === void 0 ? void 0 : _a.split(',')) || [];
+        return adminWallets.some(adminAddr => adminAddr.trim().toLowerCase() === walletAddress.toLowerCase());
+    }
+    catch (error) {
+        console.error('Error checking admin status:', error);
+        // Fallback to environment variable on error
+        const adminWallets = ((_b = process.env.ADMIN_WALLET_ADDRESSES) === null || _b === void 0 ? void 0 : _b.split(',')) || [];
+        return adminWallets.some(adminAddr => adminAddr.trim().toLowerCase() === walletAddress.toLowerCase());
+    }
+});
+exports.isAdminUser = isAdminUser;
+/**
  * Admin wallet verification middleware
  * Only allows requests from whitelisted admin wallet addresses
  */
 const verifyAdmin = (req, res, next) => __awaiter(void 0, void 0, void 0, function* () {
-    var _a;
     try {
         // First verify wallet
         yield (0, exports.verifyWallet)(req, res, () => { });
         if (!req.walletAddress) {
             return res.status(401).json({ error: 'Wallet address required' });
         }
-        // Get admin wallet addresses from environment
-        const adminWallets = ((_a = process.env.ADMIN_WALLET_ADDRESSES) === null || _a === void 0 ? void 0 : _a.split(',')) || [];
-        if (adminWallets.length === 0) {
-            console.warn('No admin wallets configured. Admin endpoints are unprotected.');
-            return next();
-        }
-        // Check if wallet is in admin list
-        const isAdmin = adminWallets.some(adminAddr => adminAddr.trim().toLowerCase() === req.walletAddress.toLowerCase());
+        const isAdmin = yield (0, exports.isAdminUser)(req.walletAddress);
         if (!isAdmin) {
             return res.status(403).json({ error: 'Admin access required' });
         }

@@ -51,7 +51,11 @@ const dotenv_1 = __importDefault(require("dotenv"));
 const cors_1 = __importDefault(require("cors"));
 const helmet_1 = __importDefault(require("helmet"));
 const morgan_1 = __importDefault(require("morgan"));
+const http_1 = require("http");
+const ws_1 = require("ws");
+const url_1 = require("url");
 const logger_1 = __importStar(require("./utils/logger"));
+const voice_service_1 = __importDefault(require("./services/voice.service"));
 // Load environment variables
 dotenv_1.default.config();
 // Validate environment variables
@@ -67,7 +71,23 @@ if (envValidation.warnings.length > 0) {
     console.warn(env_validation_1.envValidator.getReport());
 }
 const app = (0, express_1.default)();
+const server = (0, http_1.createServer)(app);
 const PORT = process.env.PORT || 5000;
+// WebSocket Server for Voice Sessions
+const wss = new ws_1.WebSocketServer({
+    server,
+    verifyClient: (info, callback) => {
+        var _a;
+        // Only allow connections to /api/voice/ws/:sessionId
+        const url = (0, url_1.parse)(info.req.url || '', true);
+        if ((_a = url.pathname) === null || _a === void 0 ? void 0 : _a.startsWith('/api/voice/ws/')) {
+            callback(true);
+        }
+        else {
+            callback(false, 404, 'Not Found');
+        }
+    }
+});
 // Middleware
 app.use((0, helmet_1.default)());
 app.use((0, cors_1.default)());
@@ -218,8 +238,105 @@ function initializeAutomatedSettlement() {
 }
 // Error handling middleware (must be last)
 app.use(logger_1.errorLoggerMiddleware);
+// WebSocket handler for voice sessions
+wss.on('connection', (ws, req) => {
+    var _a;
+    const url = (0, url_1.parse)(req.url || '', true);
+    // Extract sessionId from path like /api/voice/ws/:sessionId
+    const pathParts = (_a = url.pathname) === null || _a === void 0 ? void 0 : _a.split('/').filter(p => p);
+    const sessionIdIndex = pathParts === null || pathParts === void 0 ? void 0 : pathParts.indexOf('ws');
+    const sessionId = sessionIdIndex !== undefined && sessionIdIndex >= 0 && pathParts
+        ? pathParts[sessionIdIndex + 1]
+        : null;
+    if (!sessionId) {
+        logger_1.default.warn('WebSocket connection without sessionId', { path: url.pathname });
+        ws.close(1008, 'Session ID required');
+        return;
+    }
+    logger_1.default.info('WebSocket connection', { sessionId });
+    // Get the Grok Voice session
+    const session = voice_service_1.default.getSession(sessionId);
+    if (!session) {
+        logger_1.default.warn('WebSocket connection for non-existent session', { sessionId });
+        ws.close(1008, 'Session not found');
+        return;
+    }
+    // Forward messages from Grok Voice Agent to client
+    const onAudio = (audioBuffer) => {
+        if (ws.readyState === ws_1.WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'audio',
+                data: audioBuffer.toString('base64'),
+            }));
+        }
+    };
+    const onTranscript = (text) => {
+        if (ws.readyState === ws_1.WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'transcript',
+                text,
+                isUser: false,
+            }));
+        }
+    };
+    const onResponseDone = () => {
+        if (ws.readyState === ws_1.WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'response_done',
+            }));
+        }
+    };
+    const onError = (error) => {
+        if (ws.readyState === ws_1.WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'error',
+                message: error.message || 'An error occurred',
+            }));
+        }
+    };
+    // Register event listeners
+    session.on('audio', onAudio);
+    session.on('transcript', onTranscript);
+    session.on('response_done', onResponseDone);
+    session.on('error', onError);
+    // Handle messages from client
+    ws.on('message', (message) => {
+        try {
+            const data = JSON.parse(message.toString());
+            if (data.type === 'audio' && data.data) {
+                // Send audio to Grok Voice Agent
+                const audioBuffer = Buffer.from(data.data, 'base64');
+                session.sendAudio(audioBuffer);
+            }
+            else if (data.type === 'text' && data.text) {
+                // Send text to Grok Voice Agent
+                session.sendText(data.text);
+            }
+        }
+        catch (error) {
+            logger_1.default.error('WebSocket message error', { error: error.message, sessionId });
+            ws.send(JSON.stringify({
+                type: 'error',
+                message: 'Failed to process message',
+            }));
+        }
+    });
+    // Handle WebSocket close
+    ws.on('close', () => {
+        logger_1.default.info('WebSocket connection closed', { sessionId });
+        // Remove event listeners
+        session.removeListener('audio', onAudio);
+        session.removeListener('transcript', onTranscript);
+        session.removeListener('response_done', onResponseDone);
+        session.removeListener('error', onError);
+    });
+    // Handle WebSocket errors
+    ws.on('error', (error) => {
+        logger_1.default.error('WebSocket error', { error: error.message, sessionId });
+    });
+});
 // Start Server
-app.listen(PORT, () => __awaiter(void 0, void 0, void 0, function* () {
+server.listen(PORT, () => __awaiter(void 0, void 0, void 0, function* () {
     logger_1.default.info(`Server started`, { port: PORT, env: process.env.NODE_ENV || 'development' });
     console.log(`🚀 Server running on port ${PORT}`);
     yield initializeSolanaServices();

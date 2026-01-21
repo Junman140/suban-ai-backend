@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import balanceTracker from '../services/solana/balance-tracker.service';
 import priceOracle from '../services/solana/price-oracle.service';
 import voiceService from '../services/voice.service';
-import { verifyWallet } from '../middleware/auth.middleware';
+import { verifyWallet, isAdminUser } from '../middleware/auth.middleware';
 import { voiceRateLimiter, costCalculationRateLimiter } from '../middleware/rateLimit.middleware';
 
 const router = Router();
@@ -29,32 +29,50 @@ router.post('/session', voiceRateLimiter, verifyWallet, async (req: Request, res
             });
         }
 
-        // Estimate cost for voice session
-        const requiredTokens = priceOracle.calculateTokenBurn(ESTIMATED_VOICE_SESSION_COST_USD);
+        // Check if user is admin (admins bypass token checks for testing)
+        const isAdmin = await isAdminUser(userWallet);
 
-        // Check balance
-        const hasSufficientBalance = await balanceTracker.hasSufficientBalance(
-            userWallet,
-            requiredTokens
-        );
+        // Check balance (skip for admin users)
+        if (!isAdmin) {
+            // Estimate cost for voice session (only for non-admin users)
+            let requiredTokens;
+            try {
+                requiredTokens = priceOracle.calculateTokenBurn(ESTIMATED_VOICE_SESSION_COST_USD);
+            } catch (error: any) {
+                // If price oracle is unavailable, return error
+                console.error('Price oracle error:', error);
+                return res.status(503).json({
+                    error: 'Price service unavailable',
+                    message: 'Unable to calculate token cost. Please try again later.',
+                });
+            }
 
-        if (!hasSufficientBalance) {
-            const balance = await balanceTracker.getBalance(userWallet);
-            return res.status(402).json({
-                error: 'Insufficient tokens',
-                required: requiredTokens,
-                available: balance.currentBalance,
-                costUsd: ESTIMATED_VOICE_SESSION_COST_USD,
-            });
+            const hasSufficientBalance = await balanceTracker.hasSufficientBalance(
+                userWallet,
+                requiredTokens
+            );
+
+            if (!hasSufficientBalance) {
+                const balance = await balanceTracker.getBalance(userWallet);
+                return res.status(402).json({
+                    error: 'Insufficient tokens',
+                    required: requiredTokens,
+                    available: balance.currentBalance,
+                    costUsd: ESTIMATED_VOICE_SESSION_COST_USD,
+                });
+            }
         }
 
         // Create voice session
+        console.log('🎤 Creating Grok Voice session...');
         const session = await voiceService.createSession({
             model: model || 'grok-4-1-fast-non-reasoning',
             voice: voice || 'Ara',
             systemInstructions: systemInstructions || '',
             temperature: temperature || 0.7,
         });
+
+        console.log('✅ Grok Voice session created:', session.sessionId);
 
         res.json({
             sessionId: session.sessionId,

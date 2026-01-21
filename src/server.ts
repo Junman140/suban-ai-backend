@@ -4,7 +4,11 @@ import dotenv from 'dotenv';
 import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
+import { createServer } from 'http';
+import { WebSocketServer, WebSocket } from 'ws';
+import { parse } from 'url';
 import logger, { requestLoggerMiddleware, errorLoggerMiddleware } from './utils/logger';
+import voiceService from './services/voice.service';
 
 // Load environment variables
 dotenv.config();
@@ -25,7 +29,22 @@ if (envValidation.warnings.length > 0) {
 }
 
 const app = express();
+const server = createServer(app);
 const PORT = process.env.PORT || 5000;
+
+// WebSocket Server for Voice Sessions
+const wss = new WebSocketServer({ 
+    server,
+    noServer: false,
+    verifyClient: (info, callback) => {
+        // Allow all WebSocket connections - path validation happens in connection handler
+        const url = parse(info.req.url || '', true);
+        logger.info('WebSocket verification', { pathname: url.pathname, url: info.req.url });
+        
+        // Accept all WebSocket connections - we'll validate the path inside the handler
+        callback(true);
+    }
+});
 
 // Middleware
 app.use(helmet());
@@ -202,8 +221,238 @@ async function initializeAutomatedSettlement() {
 // Error handling middleware (must be last)
 app.use(errorLoggerMiddleware);
 
+// WebSocket handler for voice sessions
+wss.on('connection', (ws: WebSocket, req) => {
+    const url = parse(req.url || '', true);
+    logger.info('WebSocket connection attempt', { pathname: url.pathname, url: req.url });
+    
+    // Validate path starts with /api/voice/ws/
+    if (!url.pathname?.startsWith('/api/voice/ws/')) {
+        logger.warn('WebSocket connection rejected - invalid path', { path: url.pathname });
+        ws.close(1008, 'Invalid path');
+        return;
+    }
+    
+    // Extract sessionId from path like /api/voice/ws/:sessionId
+    const pathParts = url.pathname?.split('/').filter(p => p);
+    const sessionIdIndex = pathParts?.indexOf('ws');
+    const sessionId = sessionIdIndex !== undefined && sessionIdIndex >= 0 && pathParts 
+        ? pathParts[sessionIdIndex + 1] 
+        : null;
+
+    if (!sessionId) {
+        logger.warn('WebSocket connection without sessionId', { path: url.pathname });
+        ws.close(1008, 'Session ID required');
+        return;
+    }
+
+    logger.info('WebSocket connection established', { sessionId });
+
+    // Get the Grok Voice session
+    const session = voiceService.getSession(sessionId);
+    if (!session) {
+        logger.warn('WebSocket connection for non-existent session', { sessionId });
+        ws.close(1008, 'Session not found');
+        return;
+    }
+
+    // Forward messages from Grok Voice Agent to client
+    const onAudio = (audioBuffer: Buffer) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'audio',
+                data: audioBuffer.toString('base64'),
+            }));
+        }
+    };
+
+    const onTranscript = (text: string) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'transcript',
+                text,
+            }));
+        }
+    };
+
+    const onTranscriptDone = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'transcript_done',
+            }));
+        }
+    };
+
+    const onUserTranscript = (text: string) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'user_transcript',
+                text,
+            }));
+        }
+    };
+
+    const onSpeechStarted = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'speech_started',
+            }));
+        }
+    };
+
+    const onSpeechStopped = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'speech_stopped',
+            }));
+        }
+    };
+
+    const onResponseCreated = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'response_created',
+            }));
+        }
+    };
+
+    const onResponseDone = () => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'response_done',
+            }));
+        }
+    };
+
+    const onError = (error: Error) => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'error',
+                message: error.message || 'An error occurred',
+            }));
+        }
+    };
+
+    // Register event listeners
+    session.on('audio', onAudio);
+    session.on('transcript', onTranscript);
+    session.on('transcript_done', onTranscriptDone);
+    session.on('user_transcript', onUserTranscript);
+    session.on('speech_started', onSpeechStarted);
+    session.on('speech_stopped', onSpeechStopped);
+    session.on('response_created', onResponseCreated);
+    session.on('response_done', onResponseDone);
+    session.on('error', (error: Error) => {
+        logger.error('Grok Voice session error', { error: error.message, sessionId });
+        onError(error);
+    });
+    session.on('close', () => {
+        logger.warn('Grok Voice session closed', { sessionId });
+        // Close client WebSocket if Grok session closes
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.close(1000, 'Grok session closed');
+        }
+    });
+    session.on('error', (error: Error) => {
+        logger.error('Grok Voice session error in handler', { error: error.message, sessionId });
+        // Forward error to client
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+                type: 'error',
+                message: error.message || 'Grok session error',
+            }));
+        }
+    });
+    session.on('connected', () => {
+        logger.info('Grok Voice session connected', { sessionId });
+    });
+
+    // Send initial connection confirmation to client
+    if (ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({
+            type: 'connected',
+            sessionId,
+        }));
+    }
+
+    // Handle messages from client
+    ws.on('message', (message: Buffer) => {
+        try {
+            const data = JSON.parse(message.toString());
+            
+            // Debug: log all message types to see what we're receiving
+            if (!(ws as any)._messageLogCount) {
+                (ws as any)._messageLogCount = 0;
+            }
+            if ((ws as any)._messageLogCount < 5) {
+                logger.info('📨 Received WebSocket message from client', { 
+                    sessionId,
+                    type: data.type,
+                    hasData: !!data.data,
+                    dataLength: data.data?.length,
+                    count: (ws as any)._messageLogCount + 1
+                });
+                (ws as any)._messageLogCount++;
+            }
+
+            if (data.type === 'audio' && data.data) {
+                // Send audio to Grok Voice Agent
+                const audioBuffer = Buffer.from(data.data, 'base64');
+                // Debug: log first few audio messages to verify streaming
+                if (!(ws as any)._audioLogCount) {
+                    (ws as any)._audioLogCount = 0;
+                }
+                if ((ws as any)._audioLogCount < 5) {
+                    logger.info('📤 Forwarding audio to Grok', { 
+                        sessionId, 
+                        audioSize: audioBuffer.length,
+                        base64Length: data.data.length,
+                        count: (ws as any)._audioLogCount + 1
+                    });
+                    (ws as any)._audioLogCount++;
+                }
+                session.sendAudio(audioBuffer);
+            } else if (data.type === 'text' && data.text) {
+                // Send text to Grok Voice Agent
+                session.sendText(data.text);
+            } else if (data.type === 'input_audio_buffer.commit') {
+                // With server_vad, commit is automatic - log if client sends it manually
+                logger.warn('⚠️ Client sent manual commit (server_vad handles this automatically)', { sessionId });
+                // Don't forward manual commits with server_vad - let the server handle it
+                // session.commitAudioBuffer();
+            }
+        } catch (error: any) {
+            logger.error('WebSocket message error', { error: error.message, sessionId });
+            ws.send(JSON.stringify({
+                type: 'error',
+                message: 'Failed to process message',
+            }));
+        }
+    });
+
+    // Handle WebSocket close
+    ws.on('close', () => {
+        logger.info('WebSocket connection closed', { sessionId });
+        // Remove event listeners
+        session.removeListener('audio', onAudio);
+        session.removeListener('transcript', onTranscript);
+        session.removeListener('transcript_done', onTranscriptDone);
+        session.removeListener('user_transcript', onUserTranscript);
+        session.removeListener('speech_started', onSpeechStarted);
+        session.removeListener('speech_stopped', onSpeechStopped);
+        session.removeListener('response_created', onResponseCreated);
+        session.removeListener('response_done', onResponseDone);
+        session.removeListener('error', onError);
+    });
+
+    // Handle WebSocket errors
+    ws.on('error', (error) => {
+        logger.error('WebSocket error', { error: error.message, sessionId });
+    });
+});
+
 // Start Server
-app.listen(PORT, async () => {
+server.listen(PORT, async () => {
     logger.info(`Server started`, { port: PORT, env: process.env.NODE_ENV || 'development' });
     console.log(`🚀 Server running on port ${PORT}`);
     await initializeSolanaServices();

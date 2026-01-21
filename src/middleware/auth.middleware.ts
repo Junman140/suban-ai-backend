@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { PublicKey } from '@solana/web3.js';
 import nacl from 'tweetnacl';
+import mongoose from 'mongoose';
+import User from '../models/user.model';
 
 /**
  * Wallet-based authentication middleware
@@ -57,6 +59,35 @@ export const verifyWallet = async (req: Request, res: Response, next: NextFuncti
 };
 
 /**
+ * Check if a wallet address is an admin user
+ * Checks MongoDB first, then falls back to environment variable
+ */
+export const isAdminUser = async (walletAddress: string): Promise<boolean> => {
+    try {
+        // Check MongoDB if connected
+        if (mongoose.connection.readyState === 1) {
+            const user = await User.findOne({ walletAddress: walletAddress.toLowerCase() });
+            if (user && user.isAdmin) {
+                return true;
+            }
+        }
+
+        // Fallback to environment variable
+        const adminWallets = process.env.ADMIN_WALLET_ADDRESSES?.split(',') || [];
+        return adminWallets.some(
+            adminAddr => adminAddr.trim().toLowerCase() === walletAddress.toLowerCase()
+        );
+    } catch (error) {
+        console.error('Error checking admin status:', error);
+        // Fallback to environment variable on error
+        const adminWallets = process.env.ADMIN_WALLET_ADDRESSES?.split(',') || [];
+        return adminWallets.some(
+            adminAddr => adminAddr.trim().toLowerCase() === walletAddress.toLowerCase()
+        );
+    }
+};
+
+/**
  * Admin wallet verification middleware
  * Only allows requests from whitelisted admin wallet addresses
  */
@@ -69,18 +100,7 @@ export const verifyAdmin = async (req: Request, res: Response, next: NextFunctio
             return res.status(401).json({ error: 'Wallet address required' });
         }
 
-        // Get admin wallet addresses from environment
-        const adminWallets = process.env.ADMIN_WALLET_ADDRESSES?.split(',') || [];
-        
-        if (adminWallets.length === 0) {
-            console.warn('No admin wallets configured. Admin endpoints are unprotected.');
-            return next();
-        }
-
-        // Check if wallet is in admin list
-        const isAdmin = adminWallets.some(
-            adminAddr => adminAddr.trim().toLowerCase() === req.walletAddress!.toLowerCase()
-        );
+        const isAdmin = await isAdminUser(req.walletAddress);
 
         if (!isAdmin) {
             return res.status(403).json({ error: 'Admin access required' });

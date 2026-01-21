@@ -22,11 +22,21 @@ class GrokVoiceService {
         this.maxSessionDuration = 180000; // 3 minutes in milliseconds
         this.sessions = new Map();
         this.apiKey = process.env.GROK_API_KEY || null;
+        if (!this.apiKey) {
+            console.warn('⚠️  GROK_API_KEY not found in environment variables. Voice service will be unavailable.');
+        }
+        else {
+            console.log('✅ Grok Voice Agent API key loaded');
+        }
     }
     /**
      * Check if Grok Voice Agent is configured
      */
     isAvailable() {
+        // Re-check environment variable in case it was set after initialization
+        if (!this.apiKey) {
+            this.apiKey = process.env.GROK_API_KEY || null;
+        }
         return this.apiKey !== null;
     }
     /**

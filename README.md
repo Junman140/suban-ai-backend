@@ -560,6 +560,87 @@ Every request is tracked in MongoDB:
 - **Runtime Checks**: Added `instanceof` checks to ensure Mongoose documents before operations
 - **Logging**: Comprehensive logging for debugging without exposing sensitive data
 
+### Admin Testing Support (Latest Update)
+- **Admin Users**: Users can be marked as admin in MongoDB to bypass token checks for testing
+- **Admin Script**: Easy-to-use script to mark users as admin
+- **Dual Check**: Admin status checked from MongoDB first, then falls back to environment variable
+- **Token Bypass**: Admin users can use voice and chat services without token balance requirements
+- **Testing Ready**: Perfect for testing Grok API with funded API key
+
+## 🧪 Testing Setup
+
+### Making Users Admin
+
+To mark users as admin (bypasses token checks for testing):
+
+**Using npm script:**
+```bash
+cd backend
+pnpm make-admin <walletAddress1> <walletAddress2> ...
+```
+
+**Example:**
+```bash
+pnpm make-admin 22hrGCE1Q2khNo8G2B2hhfnaAxZiwf6AVtoDnRVD2sv8
+```
+
+**Direct execution:**
+```bash
+cd backend
+pnpm ts-node scripts/make-admin.ts 22hrGCE1Q2khNo8G2B2hhfnaAxZiwf6AVtoDnRVD2sv8
+```
+
+**Multiple users:**
+```bash
+pnpm make-admin 22hrGCE1Q2khNo8G2B2hhfnaAxZiwf6AVtoDnRVD2sv8 7xKXtg2CZ3qK4gH8vF8vF8vF8vF8vF8vF8vF
+```
+
+### Admin Features
+
+- **Token Bypass**: Admin users can use voice and chat services without sufficient token balance
+- **Free Tier Bypass**: Admin users bypass free tier daily limits
+- **Testing**: Perfect for testing with funded Grok API key
+- **Dual Source**: Admin status checked from MongoDB (`isAdmin` field) or environment variable (`ADMIN_WALLET_ADDRESSES`)
+
+### Alternative: Environment Variable (No MongoDB Required)
+
+If MongoDB is not connected, you can still set admin users via environment variable:
+
+**In `.env` file:**
+```env
+ADMIN_WALLET_ADDRESSES=22hrGCE1Q2khNo8G2B2hhfnaAxZiwf6AVtoDnRVD2sv8,7xKXtg2CZ3qK4gH8vF8vF8vF8vF8vF8vF8vF
+```
+
+**Note**: Comma-separated list of wallet addresses. This works even when MongoDB is unavailable.
+
+### MongoDB Connection Issues
+
+If you see `ECONNREFUSED` or `querySrv ECONNREFUSED` errors:
+
+1. **Check MONGODB_URI**: Verify your `.env` file has the correct MongoDB connection string
+   - Format: `mongodb+srv://username:password@cluster0.xxxxx.mongodb.net/database?retryWrites=true&w=majority`
+   - Or local: `mongodb://localhost:27017/suban_ai`
+
+2. **Network Access**: 
+   - For MongoDB Atlas: Ensure your IP is whitelisted (0.0.0.0/0 for testing, but restrict in production)
+   - Check firewall settings
+   - Verify DNS resolution works: `nslookup cluster0.aleonke.mongodb.net`
+
+3. **Connection String**: 
+   - Verify username and password are correct
+   - Check if the database name is correct
+   - Ensure special characters in password are URL-encoded
+
+4. **Local MongoDB**: 
+   - If using local MongoDB, ensure the service is running
+   - Check if MongoDB is listening on the expected port (default: 27017)
+
+5. **Temporary Workaround**:
+   - Use environment variable `ADMIN_WALLET_ADDRESSES` to set admin users without MongoDB
+   - Application will function with default values (0 balance) when MongoDB is unavailable
+
+**Note**: The application will continue to function with default values (0 balance) when MongoDB is unavailable. Admin users can still be set via environment variable `ADMIN_WALLET_ADDRESSES` even without MongoDB connection.
+
 ## 💰 Cost Estimates
 
 ### Development & Infrastructure

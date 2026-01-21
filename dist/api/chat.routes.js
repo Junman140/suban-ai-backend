@@ -36,10 +36,12 @@ router.post('/message', rateLimit_middleware_1.chatRateLimiter, auth_middleware_
         if (!walletAddress) {
             return res.status(400).json({ error: 'Wallet address is required' });
         }
+        // Check if user is admin (admins bypass token checks for testing)
+        const isAdmin = yield (0, auth_middleware_1.isAdminUser)(walletAddress);
         // Determine user tier (default to free)
         const tier = userTier || 'free';
-        // Check free tier limits
-        if (tier === 'free') {
+        // Check free tier limits (skip for admin users)
+        if (tier === 'free' && !isAdmin) {
             // For free tier, we need a userId to track daily usage
             // If no userId provided, we'll use walletAddress as identifier
             const userIdentifier = userId || walletAddress;
@@ -55,16 +57,18 @@ router.post('/message', rateLimit_middleware_1.chatRateLimiter, auth_middleware_
         // Estimate cost before making request
         const estimatedCost = (0, costCalculator_1.estimateCost)(500, 500, 'deepseek'); // Rough estimate
         const requiredTokens = price_oracle_service_1.default.calculateTokenBurn(estimatedCost);
-        // Check balance
-        const hasSufficientBalance = yield balance_tracker_service_1.default.hasSufficientBalance(walletAddress, requiredTokens);
-        if (!hasSufficientBalance) {
-            const balance = yield balance_tracker_service_1.default.getBalance(walletAddress);
-            return res.status(402).json({
-                error: 'Insufficient tokens',
-                required: requiredTokens,
-                available: balance.currentBalance,
-                costUsd: estimatedCost,
-            });
+        // Check balance (skip for admin users)
+        if (!isAdmin) {
+            const hasSufficientBalance = yield balance_tracker_service_1.default.hasSufficientBalance(walletAddress, requiredTokens);
+            if (!hasSufficientBalance) {
+                const balance = yield balance_tracker_service_1.default.getBalance(walletAddress);
+                return res.status(402).json({
+                    error: 'Insufficient tokens',
+                    required: requiredTokens,
+                    available: balance.currentBalance,
+                    costUsd: estimatedCost,
+                });
+            }
         }
         // Generate session ID for tracking
         const sessionId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
@@ -92,8 +96,15 @@ router.post('/message', rateLimit_middleware_1.chatRateLimiter, auth_middleware_
             console.error('Failed to record usage:', error);
             // Don't fail the request if usage tracking fails
         }
-        // Deduct tokens after successful response
-        const updatedBalance = yield balance_tracker_service_1.default.deductTokens(walletAddress, actualRequiredTokens, 'chat', actualCostUsd);
+        // Deduct tokens after successful response (skip for admin users)
+        let updatedBalance;
+        if (!isAdmin) {
+            updatedBalance = yield balance_tracker_service_1.default.deductTokens(walletAddress, actualRequiredTokens, 'chat', actualCostUsd);
+        }
+        else {
+            // For admin users, just get balance without deducting
+            updatedBalance = yield balance_tracker_service_1.default.getBalance(walletAddress);
+        }
         res.json({
             reply: llmResponse.content,
             tokenInfo: {

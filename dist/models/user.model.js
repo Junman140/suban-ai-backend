@@ -36,8 +36,9 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const mongoose_1 = __importStar(require("mongoose"));
 const UserSchema = new mongoose_1.Schema({
     email: { type: String, unique: true, sparse: true },
-    walletAddress: { type: String, unique: true, sparse: true },
+    walletAddress: { type: String, unique: true, sparse: true, index: true },
     balance: { type: Number, default: 0 },
     isPro: { type: Boolean, default: false },
+    isAdmin: { type: Boolean, default: false, index: true },
 }, { timestamps: true });
 exports.default = mongoose_1.default.model('User', UserSchema);

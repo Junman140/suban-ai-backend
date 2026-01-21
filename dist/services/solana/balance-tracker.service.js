@@ -86,6 +86,10 @@ class BalanceTrackerService {
                 throw new Error('MongoDB not connected. Cannot record deposit.');
             }
             const balance = yield this.getBalance(walletAddress);
+            // Ensure we have a Mongoose document, not a plain object
+            if (!(balance instanceof TokenBalance_1.TokenBalance)) {
+                throw new Error('MongoDB not connected. Cannot record deposit.');
+            }
             balance.depositedAmount += amount;
             balance.currentBalance += amount;
             balance.transactions.push({
@@ -108,6 +112,10 @@ class BalanceTrackerService {
                 throw new Error('MongoDB not connected. Cannot deduct tokens.');
             }
             const balance = yield this.getBalance(walletAddress);
+            // Ensure we have a Mongoose document, not a plain object
+            if (!(balance instanceof TokenBalance_1.TokenBalance)) {
+                throw new Error('MongoDB not connected. Cannot deduct tokens.');
+            }
             if (balance.currentBalance < amount) {
                 throw new Error('Insufficient token balance');
             }

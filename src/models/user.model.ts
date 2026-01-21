@@ -5,15 +5,17 @@ export interface IUser extends Document {
     walletAddress?: string; // For crypto wallet integration later
     balance: number; // In internal tokens or USD cents
     isPro: boolean;
+    isAdmin: boolean; // Admin users bypass token checks for testing
     createdAt: Date;
     updatedAt: Date;
 }
 
 const UserSchema: Schema = new Schema({
     email: { type: String, unique: true, sparse: true },
-    walletAddress: { type: String, unique: true, sparse: true },
+    walletAddress: { type: String, unique: true, sparse: true, index: true },
     balance: { type: Number, default: 0 },
     isPro: { type: Boolean, default: false },
+    isAdmin: { type: Boolean, default: false, index: true },
 }, { timestamps: true });
 
 export default mongoose.model<IUser>('User', UserSchema);
