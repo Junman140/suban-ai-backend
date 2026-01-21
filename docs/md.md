@@ -1,0 +1,1 @@
+gets activated by saying hey suban as long as the app is running in the ba

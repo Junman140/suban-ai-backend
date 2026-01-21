@@ -378,7 +378,37 @@ wss.on('connection', (ws: WebSocket, req) => {
     // Handle messages from client
     ws.on('message', (message: Buffer) => {
         try {
-            const data = JSON.parse(message.toString());
+            // Check if session is still valid and connected
+            const currentSession = voiceService.getSession(sessionId);
+            if (!currentSession || !currentSession.isConnected) {
+                logger.warn('Received message for disconnected session', { sessionId });
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Session disconnected',
+                    }));
+                    ws.close(1008, 'Session disconnected');
+                }
+                return;
+            }
+
+            const messageStr = message.toString();
+            let data: any;
+            
+            try {
+                data = JSON.parse(messageStr);
+            } catch (parseError: any) {
+                logger.error('Failed to parse WebSocket message as JSON', { 
+                    error: parseError.message,
+                    messagePreview: messageStr.substring(0, 100),
+                    sessionId 
+                });
+                ws.send(JSON.stringify({
+                    type: 'error',
+                    message: 'Invalid message format',
+                }));
+                return;
+            }
             
             // Debug: log all message types to see what we're receiving
             if (!(ws as any)._messageLogCount) {
@@ -396,37 +426,75 @@ wss.on('connection', (ws: WebSocket, req) => {
             }
 
             if (data.type === 'audio' && data.data) {
-                // Send audio to Grok Voice Agent
-                const audioBuffer = Buffer.from(data.data, 'base64');
-                // Debug: log first few audio messages to verify streaming
-                if (!(ws as any)._audioLogCount) {
-                    (ws as any)._audioLogCount = 0;
-                }
-                if ((ws as any)._audioLogCount < 5) {
-                    logger.info('📤 Forwarding audio to Grok', { 
-                        sessionId, 
-                        audioSize: audioBuffer.length,
-                        base64Length: data.data.length,
-                        count: (ws as any)._audioLogCount + 1
+                try {
+                    // Send audio to Grok Voice Agent
+                    const audioBuffer = Buffer.from(data.data, 'base64');
+                    // Debug: log first few audio messages to verify streaming
+                    if (!(ws as any)._audioLogCount) {
+                        (ws as any)._audioLogCount = 0;
+                    }
+                    if ((ws as any)._audioLogCount < 5) {
+                        logger.info('📤 Forwarding audio to Grok', { 
+                            sessionId, 
+                            audioSize: audioBuffer.length,
+                            base64Length: data.data.length,
+                            count: (ws as any)._audioLogCount + 1
+                        });
+                        (ws as any)._audioLogCount++;
+                    }
+                    session.sendAudio(audioBuffer);
+                } catch (audioError: any) {
+                    logger.error('Error sending audio to Grok', { 
+                        error: audioError.message,
+                        stack: audioError.stack,
+                        sessionId 
                     });
-                    (ws as any)._audioLogCount++;
+                    // Don't send error to client for audio failures - just log
+                    // Audio failures are usually transient
                 }
-                session.sendAudio(audioBuffer);
             } else if (data.type === 'text' && data.text) {
-                // Send text to Grok Voice Agent
-                session.sendText(data.text);
+                try {
+                    // Send text to Grok Voice Agent
+                    session.sendText(data.text);
+                } catch (textError: any) {
+                    logger.error('Error sending text to Grok', { 
+                        error: textError.message,
+                        sessionId 
+                    });
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Failed to send text message',
+                    }));
+                }
             } else if (data.type === 'input_audio_buffer.commit') {
                 // With server_vad, commit is automatic - log if client sends it manually
                 logger.warn('⚠️ Client sent manual commit (server_vad handles this automatically)', { sessionId });
                 // Don't forward manual commits with server_vad - let the server handle it
                 // session.commitAudioBuffer();
+            } else {
+                // Unknown message type - log but don't error
+                logger.debug('Unknown WebSocket message type', { type: data.type, sessionId });
             }
         } catch (error: any) {
-            logger.error('WebSocket message error', { error: error.message, sessionId });
-            ws.send(JSON.stringify({
-                type: 'error',
-                message: 'Failed to process message',
-            }));
+            logger.error('WebSocket message processing error', { 
+                error: error.message,
+                stack: error.stack,
+                sessionId 
+            });
+            // Only send error if WebSocket is still open
+            if (ws.readyState === WebSocket.OPEN) {
+                try {
+                    ws.send(JSON.stringify({
+                        type: 'error',
+                        message: 'Failed to process message',
+                    }));
+                } catch (sendError: any) {
+                    logger.error('Failed to send error message to client', { 
+                        error: sendError.message,
+                        sessionId 
+                    });
+                }
+            }
         }
     });
 

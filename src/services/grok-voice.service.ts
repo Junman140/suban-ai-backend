@@ -236,6 +236,7 @@ class GrokVoiceSessionImpl extends EventEmitter implements GrokVoiceSession {
         // Configure session according to Grok Voice Agent API specification
         const defaultInstructions = `You are Suban, an AI voice assistant created for gamers and AI enthusiasts. 
 You are helpful, friendly, and conversational. Your purpose is to assist users with their questions and tasks.
+Support multiple languages. Accurately transcribe what the user says; do not infer or hallucinate words. If any part is unclear, ask the user to repeat or clarify instead of guessing. Keep answers concise and faithful to what was spoken.
 When users speak, wait for them to finish their complete thought before responding - be patient and don't interrupt.
 Always identify yourself as Suban, not Grok or any other AI.`;
 
@@ -373,31 +374,49 @@ Always identify yourself as Suban, not Grok or any other AI.`;
 
     sendAudio(audioBuffer: Buffer): void {
         if (!this.ws || !this.isConnected) {
-            throw new Error('Session not connected');
+            console.warn('⚠️ Attempted to send audio to disconnected session', { sessionId: this.sessionId });
+            return; // Don't throw - just silently fail (session might be closing)
         }
 
-        // Convert audio buffer to base64 PCM16 format
-        // The audio should already be in PCM16 format from the frontend
-        const audioMessage = {
-            type: 'input_audio_buffer.append',
-            audio: audioBuffer.toString('base64'),
-        };
-
-        // Debug: log first few audio sends
-        if (!(this as any)._audioSendCount) {
-            (this as any)._audioSendCount = 0;
-        }
-        if ((this as any)._audioSendCount < 3) {
-            console.log('📤 Sending audio to Grok API', {
+        // Check WebSocket state
+        if (this.ws.readyState !== WebSocket.OPEN) {
+            console.warn('⚠️ WebSocket not open, cannot send audio', { 
                 sessionId: this.sessionId,
-                audioSize: audioBuffer.length,
-                base64Length: audioMessage.audio.length,
-                count: (this as any)._audioSendCount + 1
+                readyState: this.ws.readyState 
             });
-            (this as any)._audioSendCount++;
+            return;
         }
 
-        this.ws.send(JSON.stringify(audioMessage));
+        try {
+            // Convert audio buffer to base64 PCM16 format
+            // The audio should already be in PCM16 format from the frontend
+            const audioMessage = {
+                type: 'input_audio_buffer.append',
+                audio: audioBuffer.toString('base64'),
+            };
+
+            // Debug: log first few audio sends
+            if (!(this as any)._audioSendCount) {
+                (this as any)._audioSendCount = 0;
+            }
+            if ((this as any)._audioSendCount < 3) {
+                console.log('📤 Sending audio to Grok API', {
+                    sessionId: this.sessionId,
+                    audioSize: audioBuffer.length,
+                    base64Length: audioMessage.audio.length,
+                    count: (this as any)._audioSendCount + 1
+                });
+                (this as any)._audioSendCount++;
+            }
+
+            this.ws.send(JSON.stringify(audioMessage));
+        } catch (error: any) {
+            console.error('❌ Error sending audio to Grok API', {
+                error: error.message,
+                sessionId: this.sessionId
+            });
+            // Don't throw - let the session continue
+        }
     }
 
     sendText(text: string): void {
