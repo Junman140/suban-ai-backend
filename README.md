@@ -1,6 +1,6 @@
-# AI Suban - Solana Token-Gated AI Platform
+# Likable - Solana Token-Gated AI Trading Companion Platform
 
-A Web3-native AI platform where users pay for AI services using a Solana SPL token. Features dynamic USD-based pricing, 50/50 burn/treasury tokenomics, and multi-wallet support.
+Likable is a Web3-native **AI trading companion** platform where users pay for AI services using a Solana SPL token. It features dynamic USD-based pricing, 50/50 burn/treasury tokenomics, and multi-wallet support.
 
 ## 🌟 Features
 
@@ -44,7 +44,7 @@ A Web3-native AI platform where users pay for AI services using a Solana SPL tok
 1. **Clone the repository**
 ```bash
 git clone <your-repo>
-cd "Suban AI"
+cd "Likable"
 ```
 
 2. **Install dependencies**

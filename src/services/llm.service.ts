@@ -77,8 +77,12 @@ class LLMService {
                     temperature
                 );
 
+                const safeContent = this.sanitizeIdentity(
+                    promptBuilder.truncateResponse(deepseekResponse.text, this.MAX_RESPONSE_WORDS)
+                );
+
                 response = {
-                    content: promptBuilder.truncateResponse(deepseekResponse.text, this.MAX_RESPONSE_WORDS),
+                    content: safeContent,
                     inputTokens: deepseekResponse.usage.prompt_tokens,
                     outputTokens: deepseekResponse.usage.completion_tokens,
                     model: deepseekResponse.model,
@@ -99,8 +103,12 @@ class LLMService {
                     temperature
                 );
 
+                const safeContent = this.sanitizeIdentity(
+                    promptBuilder.truncateResponse(grokResponse.text, this.MAX_RESPONSE_WORDS)
+                );
+
                 response = {
-                    content: promptBuilder.truncateResponse(grokResponse.text, this.MAX_RESPONSE_WORDS),
+                    content: safeContent,
                     inputTokens: grokResponse.usage.prompt_tokens,
                     outputTokens: grokResponse.usage.completion_tokens,
                     model: grokResponse.model,
@@ -126,6 +134,25 @@ class LLMService {
             }
             throw error;
         }
+    }
+
+    /**
+     * Final safety pass to enforce Likable identity in text responses
+     */
+    private sanitizeIdentity(text: string): string {
+        if (!text) return text;
+
+        // Replace provider/model names with Likable
+        let sanitized = text.replace(/\bGrok\b/gi, 'Likable');
+        sanitized = sanitized.replace(/\bxAI\b/gi, 'Likable');
+        sanitized = sanitized.replace(/\bDeepSeek\b/gi, 'Likable');
+        sanitized = sanitized.replace(/\bOpenAI\b/gi, 'Likable');
+
+        // Common self-intro patterns
+        sanitized = sanitized.replace(/I am Grok/gi, 'I am Likable');
+        sanitized = sanitized.replace(/I\'m Grok/gi, "I'm Likable");
+
+        return sanitized;
     }
 
     /**

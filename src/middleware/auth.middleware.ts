@@ -3,6 +3,7 @@ import { PublicKey } from '@solana/web3.js';
 import nacl from 'tweetnacl';
 import mongoose from 'mongoose';
 import User from '../models/user.model';
+import { verifyAuthToken } from '../utils/authToken';
 
 /**
  * Wallet-based authentication middleware
@@ -52,6 +53,32 @@ export const verifyWallet = async (req: Request, res: Response, next: NextFuncti
 
         // Attach wallet address to request
         req.walletAddress = walletAddress;
+        next();
+    } catch (error: any) {
+        res.status(401).json({ error: 'Authentication failed', details: error.message });
+    }
+};
+
+/**
+ * Token-based authentication middleware
+ * Reads JWT auth token from Authorization header and rehydrates walletAddress
+ */
+export const verifyTokenAuth = async (req: Request, res: Response, next: NextFunction) => {
+    try {
+        const authHeader = req.headers.authorization || req.headers.Authorization;
+
+        if (!authHeader || typeof authHeader !== 'string' || !authHeader.startsWith('Bearer ')) {
+            return res.status(401).json({ error: 'Missing or invalid Authorization header' });
+        }
+
+        const token = authHeader.substring('Bearer '.length).trim();
+        const payload = verifyAuthToken(token);
+
+        if (!payload?.walletAddress) {
+            return res.status(401).json({ error: 'Invalid or expired token' });
+        }
+
+        req.walletAddress = payload.walletAddress;
         next();
     } catch (error: any) {
         res.status(401).json({ error: 'Authentication failed', details: error.message });

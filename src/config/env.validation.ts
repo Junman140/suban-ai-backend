@@ -66,6 +66,9 @@ export class EnvValidator {
         this.validateOptional('BURN_FLOOR', '0.05', 'Minimum token burn amount');
         this.validateOptional('BURN_CEILING', '50', 'Maximum token burn amount');
 
+        // Auth configuration
+        this.validateOptional('JWT_SECRET', null, 'JWT secret for signing auth tokens (required for persistent login)');
+
         // Warning for missing optional but important variables
         if (!process.env.BACKEND_WALLET_PRIVATE_KEY) {
             this.config.warnings.push('BACKEND_WALLET_PRIVATE_KEY not set. Settlement functionality will not work.');
