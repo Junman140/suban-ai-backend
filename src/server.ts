@@ -213,6 +213,7 @@ app.use(errorLoggerMiddleware);
 // WebSocket handler for voice sessions
 wss.on('connection', (ws: WebSocket, req) => {
     const url = parse(req.url || '', true);
+main
     logger.info('WebSocket connection attempt', { pathname: url.pathname, url: req.url });
 
     if (!url.pathname?.startsWith('/api/voice/ws/')) {
@@ -222,6 +223,19 @@ wss.on('connection', (ws: WebSocket, req) => {
     }
 
     const pathParts = url.pathname?.split('/').filter(p => p);
+    const pathname = url.pathname || '';
+    logger.info('WebSocket connection attempt', { pathname, url: req.url });
+    
+    // Validate path contains /voice/ws/ (supports deployments where an extra /api prefix is added)
+    if (!pathname.includes('/voice/ws/')) {
+        logger.warn('WebSocket connection rejected - invalid path', { path: pathname });
+        ws.close(1008, 'Invalid path');
+        return;
+    }
+    
+    // Extract sessionId from path like */voice/ws/:sessionId
+    const pathParts = pathname.split('/').filter(p => p);
+main
     const sessionIdIndex = pathParts?.indexOf('ws');
     const sessionId = sessionIdIndex !== undefined && sessionIdIndex >= 0 && pathParts
         ? pathParts[sessionIdIndex + 1]
