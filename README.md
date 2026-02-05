@@ -38,6 +38,7 @@ Likable is a Web3-native **AI trading companion** platform where users pay for A
 - pnpm
 - MongoDB
 - Solana wallet (Phantom recommended)
+- **FFmpeg** (optional): For Meme Studio GIF output. Install and ensure it’s on PATH; otherwise the API uses `format: 'video'` for GIF requests and returns `gifUnavailable: true` so you can handle GIF conversion elsewhere.
 
 ### Installation
 

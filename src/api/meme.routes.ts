@@ -1,13 +1,13 @@
 /**
  * Meme Studio API
  * GET  /api/meme/templates  - List crypto meme templates
- * POST /api/meme/generate  - Generate meme (image DALL-E, video/GIF LTX)
+ * POST /api/meme/generate  - Generate meme (image Gemini/Reve, video/GIF LTX)
  * GET  /api/meme/file/:filename - Serve generated video/GIF file
  */
 
 import path from 'path';
 import { Router, Request, Response } from 'express';
-import { getTemplates, generateMeme, MEME_STYLES, getGeneratedDir, isSafeGeneratedFilename } from '../services/meme.service';
+import { getTemplates, generateMeme, MEME_STYLES, MEME_IMAGE_PROVIDERS, getGeneratedDir, isSafeGeneratedFilename } from '../services/meme.service';
 import { memeRateLimiter } from '../middleware/rateLimit.middleware';
 import fs from 'fs/promises';
 
@@ -29,7 +29,7 @@ router.get('/templates', async (_req: Request, res: Response) => {
 
 /**
  * POST /api/meme/generate
- * Body: { idea, templateId?, format?, style?, topText?, bottomText?, referenceUrl?, referenceType? }
+ * Body: { idea, templateId?, format?, style?, imageProvider? ('gemini'|'reve'), geminiModel? ('flash'|'pro'), topText?, bottomText?, referenceUrl?, referenceType? }
  * Returns: { url, format }
  */
 router.post('/generate', memeRateLimiter, async (req: Request, res: Response) => {
@@ -39,6 +39,8 @@ router.post('/generate', memeRateLimiter, async (req: Request, res: Response) =>
       templateId,
       format,
       style,
+      imageProvider,
+      geminiModel,
       topText,
       bottomText,
       referenceUrl,
@@ -54,6 +56,8 @@ router.post('/generate', memeRateLimiter, async (req: Request, res: Response) =>
       templateId,
       format: format || 'image',
       style: style || 'Classic',
+      imageProvider: imageProvider === 'reve' ? 'reve' : 'gemini',
+      geminiModel: geminiModel === 'pro' ? 'pro' : 'flash',
       topText,
       bottomText,
       referenceUrl,
@@ -65,6 +69,8 @@ router.post('/generate', memeRateLimiter, async (req: Request, res: Response) =>
     const message = error instanceof Error ? error.message : 'Meme generation failed';
     const status =
       message.includes('not configured') ? 503 :
+      message.includes('Reve image generation is not configured') ? 503 :
+      message.includes('Gemini image generation is not configured') ? 503 :
       message.includes('Only image format') ? 400 :
       message.includes('Unsupported format') ? 400 :
       message.includes('FFmpeg') ? 503 : 500;
@@ -86,7 +92,11 @@ router.get('/file/:filename', async (req: Request, res: Response) => {
     const filePath = path.join(dir, filename);
     await fs.access(filePath);
     const ext = path.extname(filename).toLowerCase();
-    const contentType = ext === '.gif' ? 'image/gif' : 'video/mp4';
+    const contentType =
+      ext === '.gif' ? 'image/gif' :
+      ext === '.png' ? 'image/png' :
+      ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
+      'video/mp4';
     res.setHeader('Content-Type', contentType);
     const buffer = await fs.readFile(filePath);
     res.send(buffer);
@@ -105,6 +115,14 @@ router.get('/file/:filename', async (req: Request, res: Response) => {
  */
 router.get('/styles', (_req: Request, res: Response) => {
   res.json(MEME_STYLES);
+});
+
+/**
+ * GET /api/meme/providers
+ * Returns list of image providers (for image format: Gemini, Reve AI).
+ */
+router.get('/providers', (_req: Request, res: Response) => {
+  res.json(MEME_IMAGE_PROVIDERS);
 });
 
 export default router;

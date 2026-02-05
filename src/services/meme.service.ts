@@ -1,9 +1,8 @@
 /**
- * Meme Studio service: crypto meme templates and DALL-E image generation.
+ * Meme Studio service: crypto meme templates and image generation (Gemini + Reve).
  * Video and GIF via LTX Studio. All communication uses the same request/response shapes as the API routes.
  */
 
-import OpenAI from 'openai';
 import fs from 'fs/promises';
 import path from 'path';
 import { v4 as uuidv4 } from 'uuid';
@@ -18,7 +17,7 @@ async function ensureGeneratedDir(): Promise<void> {
 }
 
 function safeFilename(name: string): boolean {
-  return /^[a-zA-Z0-9-]+\.(mp4|gif)$/.test(name) && !name.includes('..');
+  return /^[a-zA-Z0-9-]+\.(mp4|gif|png|jpg|jpeg)$/.test(name) && !name.includes('..');
 }
 
 export function getGeneratedDir(): string {
@@ -51,6 +50,12 @@ export interface MemeTemplate {
 }
 
 export const MEME_STYLES = ['Classic', 'DeFi', 'NGMI', 'WAGMI', 'Stonks', 'Diamond Hands'] as const;
+
+/** Image provider options for meme generation (image format only). */
+export const MEME_IMAGE_PROVIDERS: { value: ImageProvider; label: string }[] = [
+  { value: 'gemini', label: 'Gemini (Flash 2.5 / Pro)' },
+  { value: 'reve', label: 'Reve AI' },
+];
 
 const TEMPLATES: MemeTemplate[] = [
   {
@@ -157,11 +162,18 @@ export function getTemplates(): MemeTemplate[] {
   return TEMPLATES;
 }
 
+export type ImageProvider = 'gemini' | 'reve';
+
+/** Gemini model for image gen: flash (free/fast) or pro. */
+export type GeminiImageModel = 'flash' | 'pro';
+
 export interface GenerateMemeParams {
   idea: string;
   templateId?: string;
   format?: MemeFormat;
   style?: string;
+  imageProvider?: ImageProvider;
+  geminiModel?: GeminiImageModel;
   topText?: string;
   bottomText?: string;
   referenceUrl?: string;
@@ -210,6 +222,97 @@ export async function generateMeme(params: GenerateMemeParams): Promise<Generate
   throw new Error(`Unsupported format: ${format}. Use image, video, or gif.`);
 }
 
+const GEMINI_API_BASE = 'https://generativelanguage.googleapis.com/v1beta';
+/** Flash = free/fast (Nano Banana), Pro = higher quality. */
+const GEMINI_IMAGE_MODELS = { flash: 'gemini-2.0-flash-exp-image-generation', pro: 'gemini-1.5-pro' } as const;
+
+async function generateMemeImageGemini(prompt: string, model: GeminiImageModel): Promise<string> {
+  const apiKey = process.env.GOOGLE_GEMINI_API_KEY;
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error('Gemini image generation is not configured. Set GOOGLE_GEMINI_API_KEY on the server.');
+  }
+  const modelId = GEMINI_IMAGE_MODELS[model];
+  const url = `${GEMINI_API_BASE}/models/${modelId}:generateContent?key=${encodeURIComponent(apiKey.trim())}`;
+  const body = {
+    contents: [{ role: 'user', parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseModalities: ['TEXT', 'IMAGE'],
+      responseMimeType: 'text/plain',
+    },
+  };
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = `Gemini API error ${response.status}`;
+    try {
+      const json = JSON.parse(text);
+      if (json?.error?.message) message = json.error.message;
+    } catch {
+      if (text) message = text.slice(0, 200);
+    }
+    throw new Error(message);
+  }
+  const data = (await response.json()) as {
+    candidates?: Array<{
+      content?: { parts?: Array<{ inlineData?: { mimeType?: string; data?: string } }> };
+    }>;
+  };
+  const parts = data.candidates?.[0]?.content?.parts ?? [];
+  const imagePart = parts.find((p) => p.inlineData?.data);
+  if (!imagePart?.inlineData?.data) {
+    throw new Error('No image data returned from Gemini');
+  }
+  const mimeType = imagePart.inlineData.mimeType ?? 'image/png';
+  const ext = mimeType.includes('jpeg') || mimeType.includes('jpg') ? 'jpg' : 'png';
+  const buffer = Buffer.from(imagePart.inlineData.data, 'base64');
+  await ensureGeneratedDir();
+  const filename = `${uuidv4()}.${ext}`;
+  await fs.writeFile(path.join(GENERATED_DIR, filename), buffer);
+  return `/api/meme/file/${filename}`;
+}
+
+const REVE_API_BASE = 'https://api.reveai.org/v1';
+
+async function generateMemeImageReve(prompt: string): Promise<string> {
+  const apiKey = process.env.REVE_API_KEY;
+  if (!apiKey || apiKey.trim() === '') {
+    throw new Error('Reve image generation is not configured. Set REVE_API_KEY on the server.');
+  }
+  const response = await fetch(`${REVE_API_BASE}/generate`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey.trim()}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      prompt,
+      width: 1024,
+      height: 1024,
+    }),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    let message = `Reve API error ${response.status}`;
+    try {
+      const json = JSON.parse(text);
+      if (json?.message) message = json.message;
+    } catch {
+      if (text) message = text.slice(0, 200);
+    }
+    throw new Error(message);
+  }
+  const data = (await response.json()) as { status?: string; image_url?: string };
+  const imageUrl = data?.image_url;
+  if (!imageUrl) {
+    throw new Error('No image URL returned from Reve');
+  }
+  return imageUrl;
+}
+
 export async function generateMemeImage(params: GenerateMemeParams): Promise<GenerateMemeResult> {
   const idea = params.idea.trim().slice(0, MAX_IDEA_LENGTH);
   const format = params.format || 'image';
@@ -223,31 +326,17 @@ export async function generateMemeImage(params: GenerateMemeParams): Promise<Gen
     : TEMPLATES.find((t) => t.id === 'custom');
   const templateName = template?.name ?? 'Custom';
   const style = params.style ?? 'Classic';
-
-  const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || apiKey.trim() === '') {
-    throw new Error('Image generation is not configured. Set OPENAI_API_KEY on the server.');
-  }
-
-  const openai = new OpenAI({ apiKey });
   const prompt = buildMemePrompt(idea, templateName, style);
+  const provider = params.imageProvider ?? 'gemini';
+  const geminiModel = params.geminiModel ?? 'flash';
 
-  logger.info('Meme generate request', { templateId: params.templateId, ideaLength: idea.length });
+  logger.info('Meme generate request', { templateId: params.templateId, ideaLength: idea.length, imageProvider: provider, geminiModel: provider === 'gemini' ? geminiModel : undefined });
 
-  const response = await openai.images.generate({
-    model: 'dall-e-3',
-    prompt,
-    n: 1,
-    size: '1024x1024',
-    quality: 'standard',
-    response_format: 'url',
-  });
-
-  const first = response.data?.[0];
-  const imageUrl = first?.url;
-  if (!imageUrl) {
-    throw new Error('No image URL returned from generator');
+  if (provider === 'reve') {
+    const imageUrl = await generateMemeImageReve(prompt);
+    return { url: imageUrl, format: 'image' };
   }
 
+  const imageUrl = await generateMemeImageGemini(prompt, geminiModel);
   return { url: imageUrl, format: 'image' };
 }

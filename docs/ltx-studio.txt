@@ -1,4 +1,3 @@
----
 title: API Documentation
 subtitle: >-
   Power your creativity with LTX-2 — an advanced LTX Model built for seamless
