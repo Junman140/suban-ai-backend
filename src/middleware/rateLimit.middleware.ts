@@ -79,6 +79,22 @@ export const settlementRateLimiter = rateLimit({
     legacyHeaders: false,
 });
 
+// Meme generation rate limiter (10 per minute per IP - cost effective)
+export const memeRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    message: 'Too many meme generation requests, please try again in a minute.',
+    standardHeaders: true,
+    legacyHeaders: false,
+    handler: (req: Request, res: Response) => {
+        res.status(429).json({
+            error: 'Rate limit exceeded',
+            message: 'Too many meme generations. Please try again in a minute.',
+            retryAfter: 60,
+        });
+    },
+});
+
 // Deposit scan rate limiter (1 request per 10 seconds per IP or wallet - avoid RPC abuse)
 export const scanRateLimiter = rateLimit({
     windowMs: 10 * 1000, // 10 seconds

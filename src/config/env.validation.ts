@@ -69,6 +69,12 @@ export class EnvValidator {
         // Auth configuration
         this.validateOptional('JWT_SECRET', null, 'JWT secret for signing auth tokens (required for persistent login)');
 
+        // Meme Studio (DALL-E)
+        this.validateOptional('OPENAI_API_KEY', null, 'OpenAI API key for Meme Studio image generation (DALL-E 3)');
+
+        // Meme Studio Video (LTX Studio)
+        this.validateOptional('LTX_API_KEY', null, 'LTX Studio API key for Meme Studio video/GIF generation (LTX-2)');
+
         // Warning for missing optional but important variables
         if (!process.env.BACKEND_WALLET_PRIVATE_KEY) {
             this.config.warnings.push('BACKEND_WALLET_PRIVATE_KEY not set. Settlement functionality will not work.');
@@ -80,6 +86,14 @@ export class EnvValidator {
 
         if (!process.env.SOLANA_RPC_URL) {
             this.config.warnings.push('SOLANA_RPC_URL not set. Using public RPC (rate limited).');
+        }
+
+        if (!process.env.OPENAI_API_KEY) {
+            this.config.warnings.push('OPENAI_API_KEY not set. Meme Studio image generation will return 503 until set.');
+        }
+
+        if (!process.env.LTX_API_KEY) {
+            this.config.warnings.push('LTX_API_KEY not set. Meme Studio video/GIF generation will return 503 until set.');
         }
 
         return {

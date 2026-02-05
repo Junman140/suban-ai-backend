@@ -1,5 +1,6 @@
 node_modules
 .env
+generated/
 /node_modules
 logs/
 dist/
