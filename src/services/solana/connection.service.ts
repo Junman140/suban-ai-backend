@@ -27,7 +27,11 @@ class SolanaConnectionService {
     this.useOnlyConfiguredRpc = !!envUrl;
     this.rpcUrl = envUrl || this.fallbackUrls[0];
     const host = this.rpcUrl.replace(/\?.*$/, '').replace(/^https?:\/\//, '');
-    console.log(` SOLANA_RPC_URL env: ${this.useOnlyConfiguredRpc ? `set (${host})` : 'NOT SET'}`);
+    const hasApiKey = /[?&]api[-_]key=/.test(this.rpcUrl);
+    console.log(` SOLANA_RPC_URL env: ${this.useOnlyConfiguredRpc ? `set (${host}), api-key present: ${hasApiKey}` : 'NOT SET'}`);
+    if (this.useOnlyConfiguredRpc && host.includes('helius') && !hasApiKey) {
+      console.error(' SOLANA_RPC_URL (Helius) has no api-key. Helius requires ?api-key=YOUR_KEY (hyphen, not underscore).');
+    }
     if (this.useOnlyConfiguredRpc && this.rpcUrl === PUBLIC_RPC) {
       console.warn(' SOLANA_RPC_URL is the public endpoint. It will 403/429 in production.');
     } else if (!this.useOnlyConfiguredRpc) {
@@ -38,10 +42,29 @@ class SolanaConnectionService {
     });
   }
 
-  /** Use runtime env so Render-injected SOLANA_RPC_URL is used even if module loaded early. */
+  /**
+   * Use runtime env so Render-injected SOLANA_RPC_URL is used even if module loaded early.
+   * Helius requires api-key (hyphen), not api_key (underscore). We normalize for compatibility.
+   */
   private getRpcUrl(): string {
-    const url = process.env.SOLANA_RPC_URL?.trim();
-    return url || this.fallbackUrls[0];
+    let url = process.env.SOLANA_RPC_URL?.trim();
+    if (!url) return this.fallbackUrls[0];
+    const base = url.replace(/\?.*$/, '').replace(/\/+$/, '');
+    const isHelius = base.includes('helius-rpc.com') || base.includes('helius.xyz');
+    if (isHelius) {
+      const hasKey = /[?&]api[-_]key=/.test(url);
+      if (!hasKey) {
+        const heliusKey = process.env.HELIUS_API_KEY?.trim();
+        if (heliusKey) {
+          url = `${base}?api-key=${heliusKey}`;
+          console.log(' SOLANA_RPC_URL: appended HELIUS_API_KEY (api-key was missing from URL)');
+        }
+      } else if (/[?&]api_key=/.test(url)) {
+        url = url.replace(/([?&])api_key=([^&]*)/, '$1api-key=$2');
+        console.log(' SOLANA_RPC_URL: normalized api_key → api-key for Helius');
+      }
+    }
+    return url;
   }
 
   /**
