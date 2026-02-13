@@ -95,6 +95,16 @@ export const memeRateLimiter = rateLimit({
     },
 });
 
+// Deposit pay rate limiter (10 per minute per wallet - prevent abuse)
+export const depositPayRateLimiter = rateLimit({
+    windowMs: 60 * 1000,
+    max: 10,
+    keyGenerator: (req: Request) => (req as any).body?.walletAddress || req.ip || 'unknown',
+    message: 'Too many deposit attempts. Please try again in a minute.',
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 // Deposit scan rate limiter (1 request per 10 seconds per IP or wallet - avoid RPC abuse)
 export const scanRateLimiter = rateLimit({
     windowMs: 10 * 1000, // 10 seconds

@@ -8,13 +8,16 @@ import { solanaConnection } from './connection.service';
  */
 class TransactionVerifierService {
     /**
-     * Verify a transaction hash and validate it's a legitimate token deposit
+     * Verify a transaction hash and validate it's a legitimate token deposit.
+     * @param expectedRecipient - For "user received" flow: user wallet. For "treasury deposit" flow: treasury ATA.
+     * @param options.expectedSender - When set, treasury deposit mode: require transfer authority/source owner equals this (user wallet).
      */
     async verifyDepositTransaction(
         txHash: string,
         expectedRecipient: string,
         expectedAmount?: number,
-        expectedTokenMint?: string
+        expectedTokenMint?: string,
+        options?: { expectedSender?: string }
     ): Promise<{
         isValid: boolean;
         actualAmount?: number;
@@ -45,11 +48,12 @@ class TransactionVerifierService {
                 };
             }
 
-            // Validate recipient address received tokens
+            // Validate recipient address received tokens (and optionally sender)
             const recipientPubkey = new PublicKey(expectedRecipient);
             let tokenTransferFound = false;
             let actualAmount = 0;
             let tokenMint: string | null = null;
+            let transferAuthority: string | null = null;
 
             // Parse transaction instructions to find token transfers
             if (transaction.transaction.message.instructions) {
@@ -76,6 +80,9 @@ class TransactionVerifierService {
                                         actualAmount = actualAmount / Math.pow(10, decimals);
                                         
                                         tokenMint = parsed.info.mint || parsed.info.mintAccount || null;
+                                        // Authority/owner is the signer (owner of the source ATA)
+                                        transferAuthority = parsed.info.authority ?? (parsed.info as any).owner ?? parsed.info.source ?? null;
+                                        break;
                                     }
                                 }
                             }
@@ -84,7 +91,7 @@ class TransactionVerifierService {
                 }
             }
 
-            // Also check post-token-balances for confirmation
+            // Also check post-token-balances for confirmation (and infer sender from account keys if needed)
             if (!tokenTransferFound && transaction.meta?.postTokenBalances) {
                 for (const balance of transaction.meta.postTokenBalances) {
                     if (balance.owner === expectedRecipient) {
@@ -107,6 +114,22 @@ class TransactionVerifierService {
                 };
             }
 
+            // Treasury deposit mode: require transfer was from expectedSender (authority = user wallet)
+            if (options?.expectedSender) {
+                if (!transferAuthority) {
+                    return {
+                        isValid: false,
+                        error: 'Could not determine transfer sender for treasury deposit verification',
+                    };
+                }
+                if (transferAuthority !== options.expectedSender) {
+                    return {
+                        isValid: false,
+                        error: `Transfer sender mismatch. Expected: ${options.expectedSender}, Got: ${transferAuthority}`,
+                    };
+                }
+            }
+
             // Verify token mint matches (if provided)
             if (expectedTokenMint && tokenMint !== expectedTokenMint) {
                 return {
@@ -125,9 +148,6 @@ class TransactionVerifierService {
                     };
                 }
             }
-
-            // Verify transaction is not a duplicate (check if already processed)
-            // This should be checked in the route handler using a database query
 
             return {
                 isValid: true,

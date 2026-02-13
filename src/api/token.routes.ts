@@ -9,9 +9,11 @@ import jupiterService from '../services/solana/jupiter.service';
 import solanaConnection from '../services/solana/connection.service';
 import { TokenBalance } from '../models/TokenBalance';
 import { verifyAdmin } from '../middleware/auth.middleware';
-import { settlementRateLimiter, costCalculationRateLimiter, scanRateLimiter } from '../middleware/rateLimit.middleware';
+import { settlementRateLimiter, costCalculationRateLimiter, scanRateLimiter, depositPayRateLimiter } from '../middleware/rateLimit.middleware';
 
 const router = Router();
+
+const LIKA_DECIMALS_DEFAULT = 6;
 
 /**
  * GET /api/token/balance/:walletAddress
@@ -98,8 +100,51 @@ router.get('/stats', async (req: Request, res: Response) => {
 });
 
 /**
+ * GET /api/token/config
+ * Public config for building deposit transfer (treasury ATA, mint, decimals).
+ */
+router.get('/config', async (req: Request, res: Response) => {
+  try {
+    const tokenMint = process.env.TOKEN_MINT_ADDRESS;
+    const treasuryWallet = process.env.TREASURY_WALLET_ADDRESS;
+
+    if (!tokenMint || !treasuryWallet) {
+      return res.status(503).json({
+        error: 'Token or treasury not configured',
+        message: 'TOKEN_MINT_ADDRESS and TREASURY_WALLET_ADDRESS must be set.',
+      });
+    }
+
+    const mintPk = new PublicKey(tokenMint);
+    const treasuryPk = new PublicKey(treasuryWallet);
+    const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk);
+
+    let tokenDecimals = LIKA_DECIMALS_DEFAULT;
+    try {
+      const connection = solanaConnection.getConnection();
+      const mintInfo = await connection.getParsedAccountInfo(mintPk);
+      if (mintInfo.value && 'data' in mintInfo.value && mintInfo.value.data && 'parsed' in (mintInfo.value.data as any)) {
+        tokenDecimals = (mintInfo.value.data as any).parsed?.info?.decimals ?? LIKA_DECIMALS_DEFAULT;
+      }
+    } catch {
+      // use default
+    }
+
+    res.json({
+      treasuryWallet,
+      treasuryAta: treasuryAta.toString(),
+      tokenMint,
+      tokenDecimals,
+    });
+  } catch (error: any) {
+    console.error('Error fetching token config:', error);
+    res.status(500).json({ error: 'Failed to fetch token config' });
+  }
+});
+
+/**
  * POST /api/token/deposit
- * Record a token deposit (after on-chain confirmation)
+ * Record a token deposit (after on-chain confirmation) — user received tokens (e.g. from swap).
  */
 router.post('/deposit', async (req: Request, res: Response) => {
   try {
@@ -157,6 +202,77 @@ router.post('/deposit', async (req: Request, res: Response) => {
     });
   } catch (error: any) {
     console.error('Error recording deposit:', error);
+    res.status(500).json({ error: 'Failed to record deposit' });
+  }
+});
+
+/**
+ * POST /api/token/deposit/pay
+ * Record a deposit after user paid to treasury (transfer from user wallet to treasury). Verifies treasury received from sender.
+ */
+router.post('/deposit/pay', depositPayRateLimiter, async (req: Request, res: Response) => {
+  try {
+    const { walletAddress, amount, txHash } = req.body;
+
+    if (!walletAddress || !amount || !txHash) {
+      return res.status(400).json({
+        error: 'Missing required fields: walletAddress, amount, txHash',
+      });
+    }
+
+    const tokenMint = process.env.TOKEN_MINT_ADDRESS;
+    const treasuryWallet = process.env.TREASURY_WALLET_ADDRESS;
+    if (!tokenMint || !treasuryWallet) {
+      return res.status(503).json({
+        error: 'Token or treasury not configured',
+      });
+    }
+
+    const treasuryPk = new PublicKey(treasuryWallet);
+    const mintPk = new PublicKey(tokenMint);
+    const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk);
+
+    const verification = await transactionVerifier.verifyDepositTransaction(
+      txHash,
+      treasuryAta.toString(),
+      parseFloat(amount),
+      tokenMint,
+      { expectedSender: walletAddress }
+    );
+
+    if (!verification.isValid) {
+      return res.status(400).json({
+        error: 'Transaction verification failed',
+        details: verification.error,
+      });
+    }
+
+    const existingTransaction = await TokenBalance.findOne({
+      'transactions.txHash': txHash,
+    });
+    if (existingTransaction) {
+      return res.status(400).json({
+        error: 'Transaction has already been processed',
+        txHash,
+      });
+    }
+
+    const verifiedAmount = verification.actualAmount ?? parseFloat(amount);
+    const balance = await balanceTracker.recordDeposit(
+      walletAddress,
+      verifiedAmount,
+      txHash
+    );
+
+    res.json({
+      success: true,
+      balance: {
+        currentBalance: balance.currentBalance,
+        depositedAmount: balance.depositedAmount,
+      },
+    });
+  } catch (error: any) {
+    console.error('Error recording deposit (pay):', error);
     res.status(500).json({ error: 'Failed to record deposit' });
   }
 });
