@@ -5,7 +5,8 @@
     "dev": "nodemon --exec ts-node src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
-    "make-admin": "ts-node scripts/make-admin.ts"
+    "make-admin": "ts-node scripts/make-admin.ts",
+    "get-treasury-address": "ts-node scripts/get-treasury-address.ts"
   },
   "dependencies": {
     "@project-serum/anchor": "^0.26.0",

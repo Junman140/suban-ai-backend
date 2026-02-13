@@ -73,14 +73,18 @@ class SettlementService {
         // Convert mnemonic to seed
         const seed = bip39.mnemonicToSeedSync(mnemonic);
         
-        // Derive keypair using BIP44 path for Solana: m/44'/501'/0'/0'
-        // Solana uses coin type 501
-        const derived = derivePath("m/44'/501'/0'/0'", seed.toString('hex'));
-        const derivedSeed = Buffer.from(derived.key);
-        
-        // Solana Keypair.fromSeed expects 32 bytes
-        this.backendWallet = Keypair.fromSeed(derivedSeed);
-        console.log(`Backend wallet loaded from mnemonic: ${this.backendWallet.publicKey.toString()}`);
+        const derivation = (process.env.BACKEND_WALLET_DERIVATION || 'bip44').toLowerCase();
+        if (derivation === 'legacy') {
+          // Legacy: first 32 bytes of BIP39 seed (Solana CLI, some older wallets)
+          this.backendWallet = Keypair.fromSeed(seed.subarray(0, 32));
+          console.log(`Backend wallet loaded from mnemonic (legacy): ${this.backendWallet.publicKey.toString()}`);
+        } else {
+          // BIP44: m/44'/501'/0'/0' (Phantom, Solflare, modern wallets)
+          const derived = derivePath("m/44'/501'/0'/0'", seed.toString('hex'));
+          const derivedSeed = Buffer.from(derived.key);
+          this.backendWallet = Keypair.fromSeed(derivedSeed);
+          console.log(`Backend wallet loaded from mnemonic (bip44): ${this.backendWallet.publicKey.toString()}`);
+        }
         return;
       }
       
