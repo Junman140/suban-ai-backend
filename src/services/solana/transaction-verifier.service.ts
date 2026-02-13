@@ -1,5 +1,5 @@
 import { Connection, PublicKey, ParsedTransactionWithMeta } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import { solanaConnection } from './connection.service';
 
 /**
@@ -61,8 +61,11 @@ class TransactionVerifierService {
                     if ('programId' in instruction) {
                         const programId = instruction.programId.toString();
 
-                        // Check if it's a token program instruction
-                        if (programId === TOKEN_PROGRAM_ID.toString()) {
+                        // Check if it's a token program instruction (Token or Token-2022)
+                        const isTokenInstruction =
+                            programId === TOKEN_PROGRAM_ID.toString() ||
+                            programId === TOKEN_2022_PROGRAM_ID.toString();
+                        if (isTokenInstruction) {
                             // Parse token transfer
                             if ('parsed' in instruction && instruction.parsed) {
                                 const parsed = instruction.parsed;

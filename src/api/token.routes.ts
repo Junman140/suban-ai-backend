@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { PublicKey } from '@solana/web3.js';
-import { getAssociatedTokenAddress } from '@solana/spl-token';
+import { getAssociatedTokenAddress, TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID } from '@solana/spl-token';
 import balanceTracker from '../services/solana/balance-tracker.service';
 import priceOracle from '../services/solana/price-oracle.service';
 import settlementService from '../services/solana/settlement.service';
@@ -16,7 +16,7 @@ const router = Router();
 const LIKA_DECIMALS_DEFAULT = 6;
 
 /** In-memory cache for GET /token/config (zero RPC). TTL 5 minutes. */
-let tokenConfigCache: { data: { treasuryWallet: string; treasuryAta: string; tokenMint: string; tokenDecimals: number }; expires: number } | null = null;
+let tokenConfigCache: { data: { treasuryWallet: string; treasuryAta: string; tokenMint: string; tokenDecimals: number; tokenProgram: string }; expires: number } | null = null;
 const TOKEN_CONFIG_CACHE_MS = 5 * 60 * 1000;
 
 /**
@@ -127,7 +127,9 @@ router.get('/config', async (req: Request, res: Response) => {
 
     const mintPk = new PublicKey(tokenMint);
     const treasuryPk = new PublicKey(treasuryWallet);
-    const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk);
+    const useToken2022 = process.env.TOKEN_STANDARD === 'token-2022';
+    const tokenProgramId = useToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+    const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk, false, tokenProgramId);
 
     const tokenDecimals = parseInt(process.env.TOKEN_DECIMALS || '', 10) || LIKA_DECIMALS_DEFAULT;
 
@@ -136,6 +138,7 @@ router.get('/config', async (req: Request, res: Response) => {
       treasuryAta: treasuryAta.toString(),
       tokenMint,
       tokenDecimals,
+      tokenProgram: tokenProgramId.toString(),
     };
     tokenConfigCache = { data, expires: now + TOKEN_CONFIG_CACHE_MS };
     res.json(data);
