@@ -1,29 +1,47 @@
 import { Connection, Commitment } from '@solana/web3.js';
 
+const PUBLIC_RPC = 'https://api.mainnet-beta.solana.com';
+
 /**
  * Solana RPC Connection Service
- * Manages connection to Solana network with retry logic and fallback endpoints
+ * Uses SOLANA_RPC_URL when set; does not fall back to public RPCs (they return 403/429 in production).
  */
 class SolanaConnectionService {
   private connection: Connection | null = null;
   private rpcUrl: string;
+  /** When true, only use SOLANA_RPC_URL — do not try public fallbacks (they are rate-limited). */
+  private readonly useOnlyConfiguredRpc: boolean;
   private commitment: Commitment = 'confirmed';
   private fallbackUrls: string[] = [
-    'https://api.mainnet-beta.solana.com', // Public RPC (rate limited)
-    'https://solana-mainnet.g.alchemy.com/v2/demo', // Alchemy demo (requires API key)
-    'https://rpc.ankr.com/solana', // Ankr public RPC
-    'https://solana.public-rpc.com', // Public RPC alternative
+    PUBLIC_RPC,
+    'https://solana-mainnet.g.alchemy.com/v2/demo',
+    'https://rpc.ankr.com/solana',
+    'https://solana.public-rpc.com',
   ];
   private currentUrlIndex: number = 0;
   private retryCount: number = 0;
   private maxRetries: number = 3;
 
   constructor() {
-    this.rpcUrl = process.env.SOLANA_RPC_URL || this.fallbackUrls[0];
-    // Initialize connection asynchronously
+    const envUrl = process.env.SOLANA_RPC_URL?.trim();
+    this.useOnlyConfiguredRpc = !!envUrl;
+    this.rpcUrl = envUrl || this.fallbackUrls[0];
+    const host = this.rpcUrl.replace(/\?.*$/, '').replace(/^https?:\/\//, '');
+    console.log(` SOLANA_RPC_URL env: ${this.useOnlyConfiguredRpc ? `set (${host})` : 'NOT SET'}`);
+    if (this.useOnlyConfiguredRpc && this.rpcUrl === PUBLIC_RPC) {
+      console.warn(' SOLANA_RPC_URL is the public endpoint. It will 403/429 in production.');
+    } else if (!this.useOnlyConfiguredRpc) {
+      console.warn(' Using public RPC. Set SOLANA_RPC_URL in Render → Environment for this service.');
+    }
     this.initializeConnection().catch(error => {
       console.error('Failed to initialize Solana connection:', error);
     });
+  }
+
+  /** Use runtime env so Render-injected SOLANA_RPC_URL is used even if module loaded early. */
+  private getRpcUrl(): string {
+    const url = process.env.SOLANA_RPC_URL?.trim();
+    return url || this.fallbackUrls[0];
   }
 
   /**
@@ -46,29 +64,46 @@ class SolanaConnectionService {
   }
 
   /**
-   * Initialize connection to Solana RPC
+   * Initialize connection to Solana RPC. When using configured RPC, retry with backoff before failing.
    */
   private async initializeConnection(): Promise<void> {
-    try {
-      this.connection = new Connection(this.rpcUrl, {
-        commitment: this.commitment,
-        confirmTransactionInitialTimeout: 60000,
-      });
-      
-      // Test connection
-      await this.connection.getVersion();
-      console.log(` Connected to Solana RPC: ${this.rpcUrl}`);
-    } catch (error) {
-      console.error(' Failed to connect to primary Solana RPC:', error);
-      await this.tryFallback();
+    const url = this.getRpcUrl();
+    const maxAttempts = this.useOnlyConfiguredRpc ? 4 : 1; // 1 initial + 3 retries when configured
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        this.connection = new Connection(url, {
+          commitment: this.commitment,
+          confirmTransactionInitialTimeout: 60000,
+        });
+        await this.connection.getVersion();
+        this.rpcUrl = url;
+        console.log(` Connected to Solana RPC: ${url.replace(/\?.*$/, '')}`);
+        this.retryCount = 0;
+        return;
+      } catch (error) {
+        console.error(` Failed to connect to Solana RPC (attempt ${attempt}/${maxAttempts}):`, error);
+        if (attempt < maxAttempts) {
+          const delayMs = 2000 * Math.pow(2, attempt - 1);
+          console.warn(` Retrying in ${delayMs}ms...`);
+          await this.delay(delayMs);
+        } else {
+          await this.tryFallback();
+        }
+      }
     }
   }
 
   /**
-   * Try fallback RPC endpoints if primary fails
-   * Implements retry logic with exponential backoff
+   * Try fallback RPC endpoints if primary fails.
+   * When SOLANA_RPC_URL is set we do not use public fallbacks (they return 403/429).
    */
   private async tryFallback(): Promise<void> {
+    const hasConfiguredRpc = !!process.env.SOLANA_RPC_URL?.trim();
+    if (hasConfiguredRpc) {
+      throw new Error(
+        'Solana RPC failed (403/429). Check SOLANA_RPC_URL in Render Environment (e.g. Helius). Public fallbacks are not used when SOLANA_RPC_URL is set.'
+      );
+    }
     for (let i = 0; i < this.fallbackUrls.length; i++) {
       const url = this.fallbackUrls[i];
       try {
@@ -76,10 +111,7 @@ class SolanaConnectionService {
           commitment: this.commitment,
           confirmTransactionInitialTimeout: 60000,
         });
-        
-        // Test the connection
         await testConnection.getVersion();
-        
         this.connection = testConnection;
         this.rpcUrl = url;
         this.currentUrlIndex = i;
@@ -88,35 +120,33 @@ class SolanaConnectionService {
         return;
       } catch (error) {
         console.error(` Fallback RPC ${url} failed:`, error);
-        // Continue to next fallback
       }
     }
     throw new Error('All Solana RPC endpoints failed');
   }
 
   /**
-   * Retry connection with exponential backoff
+   * Retry with exponential backoff. When useOnlyConfiguredRpc we do not switch to another URL.
    */
   private async retryWithBackoff(operation: () => Promise<any>, delayMs: number = 1000): Promise<any> {
     try {
       return await operation();
     } catch (error: any) {
       if (this.retryCount >= this.maxRetries) {
-        // Try switching to next RPC endpoint
         this.retryCount = 0;
-        this.currentUrlIndex = (this.currentUrlIndex + 1) % this.fallbackUrls.length;
-        this.rpcUrl = this.fallbackUrls[this.currentUrlIndex];
-        this.connection = new Connection(this.rpcUrl, {
-          commitment: this.commitment,
-          confirmTransactionInitialTimeout: 60000,
-        });
+        if (!this.useOnlyConfiguredRpc) {
+          this.currentUrlIndex = (this.currentUrlIndex + 1) % this.fallbackUrls.length;
+          this.rpcUrl = this.fallbackUrls[this.currentUrlIndex];
+          this.connection = new Connection(this.rpcUrl, {
+            commitment: this.commitment,
+            confirmTransactionInitialTimeout: 60000,
+          });
+        }
         throw error;
       }
-
       this.retryCount++;
       const backoffDelay = delayMs * Math.pow(2, this.retryCount - 1);
       console.warn(` Retrying in ${backoffDelay}ms (attempt ${this.retryCount}/${this.maxRetries})...`);
-      
       await this.delay(backoffDelay);
       return this.retryWithBackoff(operation, delayMs);
     }
@@ -131,8 +161,8 @@ class SolanaConnectionService {
    */
   public getConnection(): Connection {
     if (!this.connection) {
-      // Synchronous fallback - connection should be initialized in constructor
-      this.connection = new Connection(this.rpcUrl, {
+      const url = this.getRpcUrl();
+      this.connection = new Connection(url, {
         commitment: this.commitment,
         confirmTransactionInitialTimeout: 60000,
       });
