@@ -29,6 +29,8 @@ if (envValidation.warnings.length > 0) {
 }
 
 const app = express();
+// Required when behind a reverse proxy (e.g. Render) so express-rate-limit can use X-Forwarded-For
+app.set('trust proxy', 1);
 const server = createServer(app);
 const PORT = process.env.PORT || 5000;
 
