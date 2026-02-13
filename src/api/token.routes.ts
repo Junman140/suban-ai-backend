@@ -15,6 +15,10 @@ const router = Router();
 
 const LIKA_DECIMALS_DEFAULT = 6;
 
+/** In-memory cache for GET /token/config (zero RPC). TTL 5 minutes. */
+let tokenConfigCache: { data: { treasuryWallet: string; treasuryAta: string; tokenMint: string; tokenDecimals: number }; expires: number } | null = null;
+const TOKEN_CONFIG_CACHE_MS = 5 * 60 * 1000;
+
 /**
  * GET /api/token/balance/:walletAddress
  * Get user token balance
@@ -102,9 +106,15 @@ router.get('/stats', async (req: Request, res: Response) => {
 /**
  * GET /api/token/config
  * Public config for building deposit transfer (treasury ATA, mint, decimals).
+ * Zero RPC: uses env only and derived ATA so we do not hit Solana RPC (avoids 429).
  */
 router.get('/config', async (req: Request, res: Response) => {
   try {
+    const now = Date.now();
+    if (tokenConfigCache && tokenConfigCache.expires > now) {
+      return res.json(tokenConfigCache.data);
+    }
+
     const tokenMint = process.env.TOKEN_MINT_ADDRESS;
     const treasuryWallet = process.env.TREASURY_WALLET_ADDRESS;
 
@@ -119,23 +129,16 @@ router.get('/config', async (req: Request, res: Response) => {
     const treasuryPk = new PublicKey(treasuryWallet);
     const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk);
 
-    let tokenDecimals = LIKA_DECIMALS_DEFAULT;
-    try {
-      const connection = solanaConnection.getConnection();
-      const mintInfo = await connection.getParsedAccountInfo(mintPk);
-      if (mintInfo.value && 'data' in mintInfo.value && mintInfo.value.data && 'parsed' in (mintInfo.value.data as any)) {
-        tokenDecimals = (mintInfo.value.data as any).parsed?.info?.decimals ?? LIKA_DECIMALS_DEFAULT;
-      }
-    } catch {
-      // use default
-    }
+    const tokenDecimals = parseInt(process.env.TOKEN_DECIMALS || '', 10) || LIKA_DECIMALS_DEFAULT;
 
-    res.json({
+    const data = {
       treasuryWallet,
       treasuryAta: treasuryAta.toString(),
       tokenMint,
       tokenDecimals,
-    });
+    };
+    tokenConfigCache = { data, expires: now + TOKEN_CONFIG_CACHE_MS };
+    res.json(data);
   } catch (error: any) {
     console.error('Error fetching token config:', error);
     res.status(500).json({ error: 'Failed to fetch token config' });
