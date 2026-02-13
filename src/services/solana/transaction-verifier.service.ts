@@ -55,42 +55,40 @@ class TransactionVerifierService {
             let tokenMint: string | null = null;
             let transferAuthority: string | null = null;
 
-            // Parse transaction instructions to find token transfers
-            if (transaction.transaction.message.instructions) {
-                for (const instruction of transaction.transaction.message.instructions) {
-                    if ('programId' in instruction) {
-                        const programId = instruction.programId.toString();
+            // Helper to extract transfer from a single instruction
+            const extractTransfer = (instruction: any): boolean => {
+                if (!('programId' in instruction)) return false;
+                const programId = instruction.programId.toString();
+                const isTokenInstruction =
+                    programId === TOKEN_PROGRAM_ID.toString() ||
+                    programId === TOKEN_2022_PROGRAM_ID.toString();
+                if (!isTokenInstruction) return false;
+                if (!('parsed' in instruction) || !instruction.parsed) return false;
+                const parsed = instruction.parsed;
+                if (parsed.type !== 'transfer' && parsed.type !== 'transferChecked') return false;
+                const destination = parsed.info.destination || parsed.info.to;
+                if (destination !== recipientPubkey.toString()) return false;
+                tokenTransferFound = true;
+                actualAmount = parsed.info.amount || parsed.info.tokenAmount?.amount || 0;
+                const decimals = parsed.info.tokenAmount?.decimals || 9;
+                actualAmount = actualAmount / Math.pow(10, decimals);
+                tokenMint = parsed.info.mint || parsed.info.mintAccount || null;
+                transferAuthority = parsed.info.authority ?? (parsed.info as any).owner ?? parsed.info.source ?? null;
+                return true;
+            };
 
-                        // Check if it's a token program instruction (Token or Token-2022)
-                        const isTokenInstruction =
-                            programId === TOKEN_PROGRAM_ID.toString() ||
-                            programId === TOKEN_2022_PROGRAM_ID.toString();
-                        if (isTokenInstruction) {
-                            // Parse token transfer
-                            if ('parsed' in instruction && instruction.parsed) {
-                                const parsed = instruction.parsed;
-                                
-                                // Check for token transfer
-                                if (parsed.type === 'transfer' || parsed.type === 'transferChecked') {
-                                    const destination = parsed.info.destination || parsed.info.to;
-                                    
-                                    if (destination === recipientPubkey.toString()) {
-                                        tokenTransferFound = true;
-                                        actualAmount = parsed.info.amount || parsed.info.tokenAmount?.amount || 0;
-                                        
-                                        // Convert amount (tokens have decimals)
-                                        const decimals = parsed.info.tokenAmount?.decimals || 9;
-                                        actualAmount = actualAmount / Math.pow(10, decimals);
-                                        
-                                        tokenMint = parsed.info.mint || parsed.info.mintAccount || null;
-                                        // Authority/owner is the signer (owner of the source ATA)
-                                        transferAuthority = parsed.info.authority ?? (parsed.info as any).owner ?? parsed.info.source ?? null;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
+            // Check top-level instructions
+            const instructions = transaction.transaction.message.instructions || [];
+            for (const instruction of instructions) {
+                if (extractTransfer(instruction)) break;
+            }
+            // Check inner instructions (Token transfers often appear here in versioned tx)
+            if (!tokenTransferFound && transaction.meta?.innerInstructions) {
+                for (const inner of transaction.meta.innerInstructions) {
+                    for (const instruction of inner.instructions) {
+                        if (extractTransfer(instruction)) break;
                     }
+                    if (tokenTransferFound) break;
                 }
             }
 

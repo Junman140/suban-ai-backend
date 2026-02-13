@@ -251,7 +251,18 @@ router.post('/deposit/pay', depositPayRateLimiter, async (req: Request, res: Res
 
     const treasuryPk = new PublicKey(treasuryWallet);
     const mintPk = new PublicKey(tokenMint);
-    const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk);
+    // Use correct token program (Token-2022 for Pump.fun create_v2) so treasury ATA matches on-chain
+    let tokenProgramId = process.env.TOKEN_STANDARD === 'token-2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+    try {
+      const conn = await solanaConnection.getConnectionHealthy();
+      const mintInfo = await conn.getAccountInfo(mintPk);
+      if (mintInfo?.owner?.toString() === TOKEN_2022_PROGRAM_ID.toString()) {
+        tokenProgramId = TOKEN_2022_PROGRAM_ID;
+      }
+    } catch {
+      // fallback to env
+    }
+    const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk, false, tokenProgramId);
 
     const amountNum = amount != null && amount !== '' ? parseFloat(String(amount)) : undefined;
     const verification = await transactionVerifier.verifyDepositTransaction(
