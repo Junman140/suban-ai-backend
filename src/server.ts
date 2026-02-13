@@ -153,6 +153,10 @@ async function initializeSolanaServices() {
 
         // Initialize price oracle
         await priceOracle.initialize();
+
+        // Ensure treasury ATA exists (backend creates it so frontend only does transfers)
+        const settlementService = (await import('./services/solana/settlement.service')).settlementService;
+        await settlementService.ensureTreasuryAta();
         
         // Set up periodic price updates (every 2 minutes)
         setInterval(async () => {

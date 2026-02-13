@@ -1,5 +1,5 @@
 import { PublicKey, Transaction, SystemProgram, Keypair, sendAndConfirmTransaction } from '@solana/web3.js';
-import { TOKEN_PROGRAM_ID, getAssociatedTokenAddress, getAccount, createBurnCheckedInstruction, createTransferCheckedInstruction } from '@solana/spl-token';
+import { TOKEN_PROGRAM_ID, TOKEN_2022_PROGRAM_ID, getAssociatedTokenAddress, getAccount, createBurnCheckedInstruction, createTransferCheckedInstruction, createAssociatedTokenAccountInstruction } from '@solana/spl-token';
 import { solanaConnection } from './connection.service';
 import { balanceTracker } from './balance-tracker.service';
 // @ts-ignore - bs58 doesn't have types
@@ -340,6 +340,48 @@ class SettlementService {
   public async triggerManualSettlement(): Promise<void> {
     console.log(' Manual settlement triggered');
     await this.executeBatchSettlement();
+  }
+
+  /**
+   * Ensure treasury ATA exists (creates it if not). Run on startup so frontend only does transfers.
+   * Requires treasury wallet = backend wallet so we can sign.
+   */
+  public async ensureTreasuryAta(): Promise<void> {
+    if (!this.backendWallet || !this.tokenMintAddress || !this.treasuryWalletAddress) return;
+    if (this.backendWallet.publicKey.toString() !== this.treasuryWalletAddress) {
+      console.log(' Treasury ATA: skipped (treasury != backend wallet)');
+      return;
+    }
+    try {
+      const conn = await solanaConnection.getConnectionHealthy();
+      const mintPk = new PublicKey(this.tokenMintAddress);
+      const treasuryPk = new PublicKey(this.treasuryWalletAddress);
+      // Detect token program from mint
+      let tokenProgramId = TOKEN_PROGRAM_ID;
+      const mintInfo = await conn.getAccountInfo(mintPk);
+      if (mintInfo?.owner?.toString() === TOKEN_2022_PROGRAM_ID.toString()) {
+        tokenProgramId = TOKEN_2022_PROGRAM_ID;
+      }
+      const ata = await getAssociatedTokenAddress(mintPk, treasuryPk, false, tokenProgramId);
+      try {
+        await getAccount(conn, ata);
+        console.log(' Treasury ATA already exists');
+      } catch {
+        const tx = new Transaction().add(
+          createAssociatedTokenAccountInstruction(
+            this.backendWallet.publicKey,
+            ata,
+            treasuryPk,
+            mintPk,
+            tokenProgramId
+          )
+        );
+        const sig = await sendAndConfirmTransaction(conn, tx, [this.backendWallet], { commitment: 'confirmed', maxRetries: 3 });
+        console.log(' Treasury ATA created:', sig);
+      }
+    } catch (e: any) {
+      console.warn(' ensureTreasuryAta failed:', e.message);
+    }
   }
 
   /**

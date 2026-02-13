@@ -106,7 +106,7 @@ router.get('/stats', async (req: Request, res: Response) => {
 /**
  * GET /api/token/config
  * Public config for building deposit transfer (treasury ATA, mint, decimals).
- * Zero RPC: uses env only and derived ATA so we do not hit Solana RPC (avoids 429).
+ * Detects token program from mint account on-chain to avoid "incorrect program id" errors.
  */
 router.get('/config', async (req: Request, res: Response) => {
   try {
@@ -127,10 +127,25 @@ router.get('/config', async (req: Request, res: Response) => {
 
     const mintPk = new PublicKey(tokenMint);
     const treasuryPk = new PublicKey(treasuryWallet);
-    const useToken2022 = process.env.TOKEN_STANDARD === 'token-2022';
-    const tokenProgramId = useToken2022 ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
-    const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk, false, tokenProgramId);
 
+    // Detect token program from mint account owner (avoids "incorrect program id" on create ATA)
+    let tokenProgramId = process.env.TOKEN_STANDARD === 'token-2022' ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+    try {
+      const conn = await solanaConnection.getConnectionHealthy();
+      const mintInfo = await conn.getAccountInfo(mintPk);
+      if (mintInfo?.owner) {
+        const ownerStr = mintInfo.owner.toString();
+        if (ownerStr === TOKEN_2022_PROGRAM_ID.toString()) {
+          tokenProgramId = TOKEN_2022_PROGRAM_ID;
+        } else {
+          tokenProgramId = TOKEN_PROGRAM_ID;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not fetch mint to detect token program, using env TOKEN_STANDARD:', (e as Error).message);
+    }
+
+    const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk, false, tokenProgramId);
     const tokenDecimals = parseInt(process.env.TOKEN_DECIMALS || '', 10) || LIKA_DECIMALS_DEFAULT;
 
     const data = {
