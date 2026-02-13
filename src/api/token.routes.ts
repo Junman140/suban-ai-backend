@@ -217,9 +217,9 @@ router.post('/deposit/pay', depositPayRateLimiter, async (req: Request, res: Res
   try {
     const { walletAddress, amount, txHash } = req.body;
 
-    if (!walletAddress || !amount || !txHash) {
+    if (!walletAddress || !txHash) {
       return res.status(400).json({
-        error: 'Missing required fields: walletAddress, amount, txHash',
+        error: 'Missing required fields: walletAddress, txHash',
       });
     }
 
@@ -235,10 +235,11 @@ router.post('/deposit/pay', depositPayRateLimiter, async (req: Request, res: Res
     const mintPk = new PublicKey(tokenMint);
     const treasuryAta = await getAssociatedTokenAddress(mintPk, treasuryPk);
 
+    const amountNum = amount != null && amount !== '' ? parseFloat(String(amount)) : undefined;
     const verification = await transactionVerifier.verifyDepositTransaction(
       txHash,
       treasuryAta.toString(),
-      parseFloat(amount),
+      amountNum,
       tokenMint,
       { expectedSender: walletAddress }
     );
@@ -260,7 +261,12 @@ router.post('/deposit/pay', depositPayRateLimiter, async (req: Request, res: Res
       });
     }
 
-    const verifiedAmount = verification.actualAmount ?? parseFloat(amount);
+    const verifiedAmount = verification.actualAmount ?? amountNum ?? 0;
+    if (verifiedAmount <= 0) {
+      return res.status(400).json({
+        error: 'Could not determine transfer amount from transaction',
+      });
+    }
     const balance = await balanceTracker.recordDeposit(
       walletAddress,
       verifiedAmount,
