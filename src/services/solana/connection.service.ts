@@ -47,8 +47,11 @@ class SolanaConnectionService {
    * Helius requires api-key (hyphen), not api_key (underscore). We normalize for compatibility.
    */
   private getRpcUrl(): string {
-    let url = process.env.SOLANA_RPC_URL?.trim();
+    let url = process.env.SOLANA_RPC_URL?.trim() || '';
     if (!url) return this.fallbackUrls[0];
+    if (!/^https?:\/\//i.test(url)) {
+      url = `https://${url.replace(/^\/+/, '')}`;
+    }
     const base = url.replace(/\?.*$/, '').replace(/\/+$/, '');
     const isHelius = base.includes('helius-rpc.com') || base.includes('helius.xyz');
     if (isHelius) {
@@ -60,7 +63,7 @@ class SolanaConnectionService {
           console.log(' SOLANA_RPC_URL: appended HELIUS_API_KEY (api-key was missing from URL)');
         }
       } else if (/[?&]api_key=/.test(url)) {
-        url = url.replace(/([?&])api_key=([^&]*)/, '$1api-key=$2');
+        url = url.replace(/([?&])api_key=([^&]*)/g, '$1api-key=$2');
         console.log(' SOLANA_RPC_URL: normalized api_key → api-key for Helius');
       }
     }
