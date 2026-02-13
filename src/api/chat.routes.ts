@@ -56,11 +56,20 @@ router.post('/message', chatRateLimiter, verifyWallet, async (req: Request, res:
 
         // Check balance (skip for admin users)
         if (!isAdmin) {
+            const hasMinimum = await balanceTracker.hasMinimumDeposit(walletAddress);
+            if (!hasMinimum) {
+                const info = await balanceTracker.getBalanceUsdInfo(walletAddress);
+                return res.status(402).json({
+                    error: 'Minimum deposit required',
+                    message: `Deposit at least $${info.minDepositUsd} worth of tokens to use chat.`,
+                    balanceUsd: info.balanceUsd,
+                    minDepositUsd: info.minDepositUsd,
+                });
+            }
             const hasSufficientBalance = await balanceTracker.hasSufficientBalance(
                 walletAddress,
                 requiredTokens
             );
-
             if (!hasSufficientBalance) {
                 const balance = await balanceTracker.getBalance(walletAddress);
                 return res.status(402).json({

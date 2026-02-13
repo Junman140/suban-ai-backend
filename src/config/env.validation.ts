@@ -55,6 +55,7 @@ export class EnvValidator {
         // Cost configuration (optional, have defaults)
         this.validateOptional('DEFAULT_CHAT_COST_USD', '0.02', 'Default chat cost in USD');
         this.validateOptional('DEFAULT_VOICE_COST_USD', '0.10', 'Default voice session cost in USD (Grok Voice Agent)');
+        this.validateOptional('MINIMUM_DEPOSIT_USD', '1', 'Minimum USD value (balance) required to access chat/voice');
 
         // Settlement configuration
         this.validateOptional('SETTLEMENT_PROGRAM_ID', null, 'Solana settlement program ID (optional)');

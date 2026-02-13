@@ -32,24 +32,30 @@ router.post('/session', voiceRateLimiter, verifyWallet, async (req: Request, res
 
         // Check balance (skip for admin users)
         if (!isAdmin) {
-            // Estimate cost for voice session (only for non-admin users)
+            const hasMinimum = await balanceTracker.hasMinimumDeposit(userWallet);
+            if (!hasMinimum) {
+                const info = await balanceTracker.getBalanceUsdInfo(userWallet);
+                return res.status(402).json({
+                    error: 'Minimum deposit required',
+                    message: `Deposit at least $${info.minDepositUsd} worth of tokens to use voice.`,
+                    balanceUsd: info.balanceUsd,
+                    minDepositUsd: info.minDepositUsd,
+                });
+            }
             let requiredTokens;
             try {
                 requiredTokens = priceOracle.calculateTokenBurn(ESTIMATED_VOICE_SESSION_COST_USD);
             } catch (error: any) {
-                // If price oracle is unavailable, return error
                 console.error('Price oracle error:', error);
                 return res.status(503).json({
                     error: 'Price service unavailable',
                     message: 'Unable to calculate token cost. Please try again later.',
                 });
             }
-
             const hasSufficientBalance = await balanceTracker.hasSufficientBalance(
                 userWallet,
                 requiredTokens
             );
-
             if (!hasSufficientBalance) {
                 const balance = await balanceTracker.getBalance(userWallet);
                 return res.status(402).json({
@@ -61,12 +67,13 @@ router.post('/session', voiceRateLimiter, verifyWallet, async (req: Request, res
             }
         }
 
-        // Create voice session
+        // Create voice session (store wallet for deduction on close)
         const session = await voiceService.createSession({
             model: model || 'grok-4-1-fast-non-reasoning',
             voice: voice || 'Ara',
             systemInstructions: systemInstructions || '',
             temperature: temperature || 0.7,
+            walletAddress: userWallet,
         });
 
         res.json({

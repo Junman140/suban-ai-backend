@@ -164,7 +164,7 @@ class BalanceTrackerService {
   }
 
   /**
-   * Check if user has sufficient balance
+   * Check if user has sufficient balance for a specific cost
    */
   public async hasSufficientBalance(
     walletAddress: string,
@@ -172,6 +172,46 @@ class BalanceTrackerService {
   ): Promise<boolean> {
     const balance = await this.getBalance(walletAddress);
     return balance.currentBalance >= requiredAmount;
+  }
+
+  /**
+   * Check if user meets minimum deposit (USD value) to access chat/voice
+   */
+  public async hasMinimumDeposit(walletAddress: string): Promise<boolean> {
+    const minUsd = parseFloat(process.env.MINIMUM_DEPOSIT_USD || '1');
+    if (minUsd <= 0) return true;
+    try {
+      const balance = await this.getBalance(walletAddress);
+      const tokenPrice = priceOracle.getTWAPPrice();
+      const balanceUsd = balance.currentBalance * tokenPrice;
+      return balanceUsd >= minUsd;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Get balance in USD and min required
+   */
+  public async getBalanceUsdInfo(walletAddress: string): Promise<{
+    balanceUsd: number;
+    minDepositUsd: number;
+    canAccess: boolean;
+  }> {
+    const minUsd = parseFloat(process.env.MINIMUM_DEPOSIT_USD || '1');
+    let balanceUsd = 0;
+    try {
+      const balance = await this.getBalance(walletAddress);
+      const tokenPrice = priceOracle.getTWAPPrice();
+      balanceUsd = balance.currentBalance * tokenPrice;
+    } catch {
+      // ignore
+    }
+    return {
+      balanceUsd,
+      minDepositUsd: minUsd,
+      canAccess: minUsd <= 0 || balanceUsd >= minUsd,
+    };
   }
 
   /**

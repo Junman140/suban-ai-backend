@@ -21,7 +21,7 @@ const TOKEN_CONFIG_CACHE_MS = 5 * 60 * 1000;
 
 /**
  * GET /api/token/balance/:walletAddress
- * Get user token balance
+ * Get user token balance and credit info (USD value, min required, canAccess)
  */
 router.get('/balance/:walletAddress', async (req: Request, res: Response) => {
   try {
@@ -32,6 +32,7 @@ router.get('/balance/:walletAddress', async (req: Request, res: Response) => {
     }
 
     const balance = await balanceTracker.getBalance(walletAddress);
+    const usdInfo = await balanceTracker.getBalanceUsdInfo(walletAddress);
 
     res.json({
       walletAddress: balance.walletAddress,
@@ -39,6 +40,9 @@ router.get('/balance/:walletAddress', async (req: Request, res: Response) => {
       depositedAmount: balance.depositedAmount,
       consumedAmount: balance.consumedAmount,
       lastUpdated: balance.lastUpdated,
+      balanceUsd: usdInfo.balanceUsd,
+      minDepositUsd: usdInfo.minDepositUsd,
+      canAccess: usdInfo.canAccess,
     });
   } catch (error: any) {
     console.error('Error fetching balance:', error);
