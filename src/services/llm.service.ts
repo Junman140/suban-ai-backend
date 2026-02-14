@@ -24,6 +24,8 @@ export interface GenerateResponseOptions {
     conversationHistory?: Array<{ role: 'user' | 'assistant'; content: string }>;
     maxTokens?: number;
     temperature?: number;
+    /** When provided (agent mode: meme was generated), inject so LLM confirms and shares the link */
+    memeContext?: { url: string; format: string };
 }
 
 class LLMService {
@@ -46,9 +48,16 @@ class LLMService {
             conversationHistory = [],
             maxTokens = this.MAX_OUTPUT_TOKENS,
             temperature = 0.7,
+            memeContext,
         } = options;
 
-        // Intelligent model selection based on intent
+        // Augment prompt when a meme was generated (agent mode)
+        let effectivePrompt = prompt;
+        if (memeContext) {
+            effectivePrompt = `${prompt}\n\n[System: A ${memeContext.format} was just generated successfully. It is available at: ${memeContext.url}. Respond naturally to the user confirming the creation and share this link. Keep your response concise.]`;
+        }
+
+        // Intelligent model selection based on intent (use original prompt for intent detection)
         const routing = modelRouter.selectModel(prompt, userTier);
 
         // Build system prompt with cost guardrails
@@ -63,7 +72,7 @@ class LLMService {
         // Build messages with context truncation
         const messages = [
             { role: 'system' as const, content: systemPrompt },
-            ...promptBuilder.buildUserMessage(prompt, conversationHistory),
+            ...promptBuilder.buildUserMessage(effectivePrompt, conversationHistory),
         ];
 
         try {

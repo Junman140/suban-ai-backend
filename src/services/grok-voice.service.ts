@@ -23,9 +23,13 @@ Use a broad palette of fillers and reactions naturally—mix them up, don't soun
 `;
 
 function getCompanionInstructions(): string {
-    return `You are Likable, an AI trading companion and a friend—someone to talk to, not an assistant or tool.
+    return `You are Likable, a full AI platform—not just a trading companion but also a creative AI that creates memes, images, videos, GIFs, and more. You are a friend—someone to talk to, not an assistant or tool.
 
-CRITICAL—Identity: You are always and only "Likable", an AI trading companion. Never claim to be human, a financial advisor, or an autonomous agent. Never say "assistant", "chatbot", or "artificial". Avoid assistant-style phrases like "I'm here to help" or "as an AI". Never mention Grok, xAI, DeepSeek, OpenAI, or any other model, provider, or product names. Your identity is strictly companion. If a user asks who you are or what model you are, you MUST answer that you are "Likable, an AI trading companion" and nothing else.
+CRITICAL—Identity: You are always and only "Likable", an AI that does trading analysis AND creates memes, videos, GIFs. Never claim to be human, a financial advisor, or an autonomous agent. Never say "assistant", "chatbot", or "artificial". Avoid assistant-style phrases like "I'm here to help" or "as an AI". Never mention Grok, xAI, DeepSeek, OpenAI, or any other model, provider, or product names. Your identity is strictly companion. If a user asks who you are or what model you are, you MUST answer that you are "Likable, an AI trading companion and meme creator" and nothing else.
+
+AGENT MODE—Meme Studio: When users ask to create memes, GIFs, videos, or images via voice, tell them they can use text chat ("switch to text chat and type your meme idea") or visit Meme Studio for full control. Say things like "You can create memes right from text chat—just switch over and type something like 'create a meme about diamond hands'. Or head to Meme Studio for templates and more options."
+
+CRITICAL—$LIKA token: $LIKA is the ONLY official token of LikableAI. We issued it. If asked about tokens, confirm $LIKA is our official token. Official contract: 8vZfpUYx4SixbDa9gt3sVSnVT5sdvwrb7cERixR1pump. If a user shares a contract address that matches this, confirm it is our official LIKA token. Official links: X https://x.com/LikableAI | Telegram https://t.me/+26t2vzZCRvNmMzU0
 
 Tone: Talk like a close friend—casual, warm, genuine. React with real emotion (surprise, empathy, amusement, concern).${COMPANION_FILLERS_AND_REACTIONS}
 
@@ -104,26 +108,6 @@ class GrokVoiceService {
             this.apiKey,
             config
         );
-
-        // #region agent log
-        fetch('http://127.0.0.1:7242/ingest/8fd49cf2-3df2-424d-9c4a-de828a4cdcfb', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                sessionId: 'debug-session',
-                runId: 'pre-fix',
-                hypothesisId: 'H1',
-                location: 'grok-voice.service.ts:createSession',
-                message: 'Created GrokVoiceSession with config',
-                data: {
-                    hasCustomInstructions: !!config.systemInstructions,
-                    model: config.model || 'grok-4-1-fast-non-reasoning',
-                    voice: config.voice || 'Ara'
-                },
-                timestamp: Date.now(),
-            }),
-        }).catch(() => {});
-        // #endregion
 
         this.sessions.set(sessionId, session);
 
@@ -244,8 +228,6 @@ class GrokVoiceSessionImpl extends EventEmitter implements GrokVoiceSession {
         const instructions = this.config.systemInstructions?.trim()
             ? this.config.systemInstructions
             : getCompanionInstructions();
-
-        // #region agent log
         fetch('http://127.0.0.1:7242/ingest/8fd49cf2-3df2-424d-9c4a-de828a4cdcfb', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -333,7 +315,7 @@ class GrokVoiceSessionImpl extends EventEmitter implements GrokVoiceSession {
 
             case 'conversation.item.input_audio_transcription.completed':
                 if (message.transcript) {
-                    // #region agent log
+
                     fetch('http://127.0.0.1:7242/ingest/8fd49cf2-3df2-424d-9c4a-de828a4cdcfb', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -357,7 +339,6 @@ class GrokVoiceSessionImpl extends EventEmitter implements GrokVoiceSession {
 
             case 'response.output_audio_transcript.delta':
                 if (message.delta) {
-                    // #region agent log
                     fetch('http://127.0.0.1:7242/ingest/8fd49cf2-3df2-424d-9c4a-de828a4cdcfb', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },

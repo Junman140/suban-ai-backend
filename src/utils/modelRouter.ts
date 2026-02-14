@@ -13,6 +13,7 @@ export type IntentType =
     | 'deep_scenario_modeling'
     | 'advanced_risk_assessment'
     | 'x_search_request'
+    | 'meme_generation'
     | 'unknown';
 
 export interface ModelRoutingResult {
@@ -73,6 +74,35 @@ class ModelRouter {
      */
     detectIntent(message: string): IntentType {
         const lowerMessage = message.toLowerCase();
+
+        // Meme / image / GIF / video creation
+        if (
+            lowerMessage.includes('create a meme') ||
+            lowerMessage.includes('make a meme') ||
+            lowerMessage.includes('generate a meme') ||
+            lowerMessage.includes('create meme') ||
+            lowerMessage.includes('make meme') ||
+            lowerMessage.includes('create a gif') ||
+            lowerMessage.includes('make a gif') ||
+            lowerMessage.includes('generate a gif') ||
+            lowerMessage.includes('create gif') ||
+            lowerMessage.includes('make gif') ||
+            lowerMessage.includes('create a video') ||
+            lowerMessage.includes('make a video') ||
+            lowerMessage.includes('generate a video') ||
+            lowerMessage.includes('create video') ||
+            lowerMessage.includes('make video') ||
+            lowerMessage.includes('create an image') ||
+            lowerMessage.includes('make an image') ||
+            lowerMessage.includes('generate an image') ||
+            lowerMessage.includes('create image') ||
+            lowerMessage.includes('make image') ||
+            lowerMessage.includes('meme about') ||
+            lowerMessage.includes('gif of') ||
+            lowerMessage.includes('video of')
+        ) {
+            return 'meme_generation';
+        }
 
         // X search request
         if (

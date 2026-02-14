@@ -3,11 +3,49 @@ import balanceTracker from '../services/solana/balance-tracker.service';
 import priceOracle from '../services/solana/price-oracle.service';
 import llmService from '../services/llm.service';
 import tokenMeterService from '../services/tokenMeter.service';
+import { generateMeme } from '../services/meme.service';
 import { verifyWallet, isAdminUser } from '../middleware/auth.middleware';
 import { chatRateLimiter, costCalculationRateLimiter } from '../middleware/rateLimit.middleware';
 import { estimateCost } from '../utils/costCalculator';
+import modelRouter from '../utils/modelRouter';
 
 const router = Router();
+
+/** Extract meme idea and format from user message for agent mode */
+function extractMemeParams(message: string): { idea: string; format: 'image' | 'gif' | 'video' } {
+    const lower = message.toLowerCase().trim();
+    let format: 'image' | 'gif' | 'video' = 'image';
+    if (lower.includes('gif')) format = 'gif';
+    else if (lower.includes('video')) format = 'video';
+
+    const prefixes = [
+        /create\s+(?:a|an)\s+meme\s+about\s+/i,
+        /make\s+(?:a|an)\s+meme\s+about\s+/i,
+        /generate\s+(?:a|an)\s+meme\s+about\s+/i,
+        /create\s+(?:a|an)\s+meme\s+(?:of|for)\s+/i,
+        /make\s+(?:a|an)\s+meme\s+(?:of|for)\s+/i,
+        /create\s+(?:a|an)\s+(?:gif|video)\s+about\s+/i,
+        /make\s+(?:a|an)\s+(?:gif|video)\s+about\s+/i,
+        /create\s+(?:a|an)\s+(?:gif|video)\s+of\s+/i,
+        /make\s+(?:a|an)\s+(?:gif|video)\s+of\s+/i,
+        /generate\s+(?:a|an)\s+(?:meme|gif|video)\s+(?:about|of|for)\s+/i,
+        /create\s+(?:a|an)\s+image\s+(?:about|of|for)\s+/i,
+        /make\s+(?:a|an)\s+image\s+(?:about|of|for)\s+/i,
+        /meme\s+about\s+/i,
+        /gif\s+of\s+/i,
+        /video\s+of\s+/i,
+    ];
+    let idea = message.trim().slice(0, 500);
+    for (const p of prefixes) {
+        const replaced = idea.replace(p, '').trim();
+        if (replaced !== idea) {
+            idea = replaced;
+            break;
+        }
+    }
+    if (!idea || idea.length < 2) idea = message.trim().slice(0, 500);
+    return { idea: idea || 'crypto meme', format };
+}
 
 /**
  * POST /api/chat/message
@@ -65,6 +103,22 @@ router.post('/message', chatRateLimiter, verifyWallet, async (req: Request, res:
         const sessionId = `chat-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
         const userIdentifier = userId || walletAddress;
 
+        // Agent mode: if meme generation intent, try to generate meme first
+        const intent = modelRouter.detectIntent(message);
+        let memeResult: { url: string; format: string } | null = null;
+        if (intent === 'meme_generation') {
+            try {
+                const { idea, format } = extractMemeParams(message);
+                memeResult = await generateMeme({
+                    idea,
+                    format,
+                    style: 'Classic',
+                });
+            } catch (memeErr: any) {
+                console.warn('Meme generation failed (agent mode):', memeErr?.message);
+            }
+        }
+
         // Text chat always uses DeepSeek (voice companion uses Grok)
         // Force DeepSeek by using 'free' tier which always routes to DeepSeek
         const llmResponse = await llmService.generateResponse(message, {
@@ -72,6 +126,7 @@ router.post('/message', chatRateLimiter, verifyWallet, async (req: Request, res:
             conversationHistory: conversationHistory || [],
             maxTokens: 500, // Cost control
             temperature: 0.7,
+            memeContext: memeResult || undefined,
         });
 
         // Calculate actual cost
@@ -112,6 +167,8 @@ router.post('/message', chatRateLimiter, verifyWallet, async (req: Request, res:
 
         res.json({
             reply: llmResponse.content,
+            memeUrl: memeResult?.url ?? undefined,
+            memeFormat: memeResult?.format ?? undefined,
             tokenInfo: {
                 cost: actualRequiredTokens,
                 costUsd: actualCostUsd,
