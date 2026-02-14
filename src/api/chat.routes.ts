@@ -6,12 +6,8 @@ import tokenMeterService from '../services/tokenMeter.service';
 import { verifyWallet, isAdminUser } from '../middleware/auth.middleware';
 import { chatRateLimiter, costCalculationRateLimiter } from '../middleware/rateLimit.middleware';
 import { estimateCost } from '../utils/costCalculator';
-import mongoose from 'mongoose';
 
 const router = Router();
-
-// Free tier limits
-const FREE_TIER_DAILY_LIMIT = 5;
 
 /**
  * POST /api/chat/message
@@ -32,24 +28,8 @@ router.post('/message', chatRateLimiter, verifyWallet, async (req: Request, res:
         // Check if user is admin (admins bypass token checks for testing)
         const isAdmin = await isAdminUser(walletAddress);
 
-        // Determine user tier (default to free)
-        const tier: 'free' | 'paid' = userTier || 'free';
-
-        // Check free tier limits (skip for admin users)
-        if (tier === 'free' && !isAdmin) {
-            // For free tier, we need a userId to track daily usage
-            // If no userId provided, we'll use walletAddress as identifier
-            const userIdentifier = userId || walletAddress;
-            const hasExceededLimit = await tokenMeterService.hasExceededFreeLimit(userIdentifier);
-            if (hasExceededLimit) {
-                return res.status(403).json({
-                    error: 'Free tier daily limit exceeded',
-                    limit: FREE_TIER_DAILY_LIMIT,
-                    message: 'You have reached the daily limit of 5 messages. Please upgrade to paid tier for unlimited access.',
-                });
-            }
-        }
-
+        // Credit system: all non-admin users need minimum deposit + sufficient balance
+        // No free tier bypass - chat is purely credit-based
         // Estimate cost before making request
         const estimatedCost = estimateCost(500, 500, 'deepseek'); // Rough estimate
         const requiredTokens = priceOracle.calculateTokenBurn(estimatedCost);
@@ -177,7 +157,6 @@ router.get('/cost', costCalculationRateLimiter, async (req: Request, res: Respon
             tokenPrice,
             userTier,
             availableProviders: providers,
-            freeTierLimit: FREE_TIER_DAILY_LIMIT,
         });
     } catch (error: any) {
         console.error('Error calculating cost:', error);
